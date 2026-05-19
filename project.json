@@ -1,0 +1,12 @@
+{
+  "base_profile": {
+    "platforms": ["ESSL_310","Direct3D_SM50","Metal"],
+    "merge_source": [ "../vanilla" ]
+  },
+  "profiles": {
+    "merged": {
+      "macros": [],
+      "platforms": ["ESSL_310", "Direct3D_SM50", "Metal"]
+    }
+  }
+}
