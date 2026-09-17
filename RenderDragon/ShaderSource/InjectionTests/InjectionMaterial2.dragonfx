@@ -1,0 +1,28 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+MaterialDefinition "InjectionMaterial2" : "BaseInjectionMaterial"
+{
+	Standard
+	{
+		[Option] SurfaceFunction : Surf
+		[Option] Lighting : NdotL
+
+		Shader:Standard
+		{
+			void Surf(in StandardSurfaceInput surfaceInput, inout StandardSurfaceOutput surfaceOutput) {
+			}
+		}
+	}
+	Pass "AlphaTest"
+	{
+		[Option] SurfaceFunction : SurfAlpha
+
+		Shader:Standard "Opaque"
+		{
+			void SurfAlpha(in StandardSurfaceInput surfaceInput, inout StandardSurfaceOutput surfaceOutput) {
+				surfaceOutput.Albedo =  vec3(1.0, 1.0, 1.0);
+			}
+		}
+	}
+}

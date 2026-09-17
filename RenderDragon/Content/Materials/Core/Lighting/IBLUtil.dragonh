@@ -1,0 +1,39 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+#pragma once
+
+#include "Core/Lighting/ConvolutionParams.dragonh"
+
+// Differentiate the Fresnel term used for perfectly reflective surfaces and
+// rougher surfaces which must average incoming light from many directions
+// https://seblagarde.wordpress.com/2011/08/17/hello-world/
+vec3 getFresnelSchlickRoughness(float cosTheta, vec3 F0, float linearRoughness) {
+	float smoothness = 1.0 - linearRoughness;
+	return F0 + (max(F0, vec3_splat(smoothness)) - F0) * pow5(1.0 - cosTheta);
+}
+
+// Retrieve the specular IBL mip level to be sampled from according to a surface's roughness
+float getIBLMipLevel(float linearRoughness, float numMips, int convolutionType) {
+	float mipLevel = 0.0f;
+	if (convolutionType == kConvolutionTypeImportanceSampling) {
+		float x = 1.0 - linearRoughness;
+		mipLevel = (1.0 - (x * x)) * (numMips - 1.0);
+	}
+	else {
+		// Mipchain has sharper reflections, so bias the roughness mapping to the higher mips
+		float x = 1.0 - linearRoughness;
+		mipLevel = (1.0 - pow8(x)) * (numMips - 1.0);
+	}
+	return mipLevel;
+}
+
+// Integrate incoming indirect light against BRDF using the LUT split-sum approximation
+// Indirect light can be from probes or SSR or both
+vec3 evaluateIndirectSpecular(sampler2D brdfLUT, vec3 indirectLight, float linearRoughness, float nDotv, vec3 f0) {
+	vec2 envDFGUV = vec2(nDotv, linearRoughness);
+	envDFGUV.y = 1.0 - envDFGUV.y;
+	vec2 envDFG = texture2D(brdfLUT, envDFGUV).rg;
+
+	return indirectLight * (f0 * envDFG.x + envDFG.y);
+}

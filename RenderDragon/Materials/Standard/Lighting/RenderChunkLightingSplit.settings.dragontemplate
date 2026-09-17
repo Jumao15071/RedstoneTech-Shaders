@@ -1,0 +1,34 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+/********************************************************
+*  (c) Mojang.    All rights reserved.                  *
+*  (c) Microsoft. All rights reserved.                  *
+*********************************************************/
+
+LightingDefinition
+{	
+	Properties 
+	{
+		[Sampler:2D] LightMapTexture
+	}
+
+	Shared
+	{
+		Declaration
+		{
+			[Option] LightingVertexFunction : computeLighting_RenderChunk_Vertex
+			[Option] LightingFunction : computeLighting_RenderChunk_Split
+
+			[VertexInput:vec2] lightmapUV : TEXCOORD1
+
+			[FragmentInput:vec2] lightmapUV : TEXCOORD1
+			[FragmentInput:vec2] ditheringAndMaskTinting : TEXCOORD2
+		}
+
+		Code
+		{
+			#include "RenderChunkLighting.dragonh"
+		}
+	}
+}

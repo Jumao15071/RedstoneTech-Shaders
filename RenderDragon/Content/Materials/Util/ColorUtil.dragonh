@@ -1,0 +1,400 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+#pragma once
+
+// White point D65 in chromaticity coordinates
+#define D65_WHITE_POINT vec2(0.31272f, 0.32903f)
+
+// from http://filmicworlds.com/blog/filmic-tonemapping-operators/
+float luminance(vec3 clr) {
+	return dot(clr, vec3(0.2126, 0.7152, 0.0722));
+}
+
+float lumaPerceptual(vec3 color) {
+	vec3 perceptualLuminance = vec3(0.299, 0.587, 0.114);
+	return dot(perceptualLuminance, color);
+}
+
+float lumaAverage(vec3 color) {
+	return dot(color, vec3(1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0));
+}
+
+vec3 desaturate(vec3 color, float amount)
+{
+	float lum = luminance(color);
+	return mix(color, vec3(lum, lum, lum), amount);
+}
+
+vec3 convertHueToRGB(float hue) {
+	float R = abs(hue * 6.0 - 3.0) - 1.0;
+	float G = 2.0 - abs(hue * 6.0 - 2.0);
+	float B = 2.0 - abs(hue * 6.0 - 4.0);
+	return saturate(vec3(R, G, B));
+}
+
+/* convertSRGBToLinear Converts a color from sRGB color space to linear color space
+ * @sRGB Color in sRGB color space to be converted
+ *
+ * Converts the input color from sRGB or gamma-corrected RGB color space to
+ * linear color space by removing gamma correction from each color channel
+ *
+ * https://en.wikipedia.org/wiki/SRGB
+ *
+ * @return Linear RGB color space version of the supplied sRGB color
+ */
+vec3 convertSRGBToLinear(vec3 sRGB) {
+	vec3 linearRGBLo = sRGB / 12.92;
+	vec3 linearRGBHi = power((sRGB + 0.055) / 1.055, vec3_splat(2.4));
+
+	sRGB.r = (sRGB.r <= 0.04045) ? linearRGBLo.r : linearRGBHi.r;
+	sRGB.g = (sRGB.g <= 0.04045) ? linearRGBLo.g : linearRGBHi.g;
+	sRGB.b = (sRGB.b <= 0.04045) ? linearRGBLo.b : linearRGBHi.b;
+
+	return sRGB;
+}
+
+/* convertLinearToSRGB Converts a color from linear color space to sRGB color space
+ * @rgb Color in linear color space to be converted
+ *
+ * Converts the input color from linear color space to sRGB color space
+ * by applying gamma correction to each color channel
+ *
+ * https://en.wikipedia.org/wiki/SRGB
+ *
+ * @return Gamma corrected sRGB color space version of the supplied linear color
+ */
+vec3 convertLinearToSRGB(vec3 rgb) {
+	vec3 sRGBLow = rgb * 12.92;
+	vec3 sRGBHigh = (power(abs(rgb), vec3_splat(1.0/2.4)) * 1.055) - 0.055;
+
+	rgb.r = (rgb.r <= 0.0031308) ? sRGBLow.r : sRGBHigh.r;
+	rgb.g = (rgb.g <= 0.0031308) ? sRGBLow.g : sRGBHigh.g;
+	rgb.b = (rgb.b <= 0.0031308) ? sRGBLow.b : sRGBHigh.b;
+
+	return rgb;
+}
+
+/* fastConvertLinearToSRGB Approximation of convertLinearToSRGB
+ * @rgb Color in linear color space to be converted
+ *
+ * @return Gamma corrected sRGB color space version of the supplied linear color
+ */
+vec3 fastConvertLinearToSRGB(vec3 rgb, const float gammaContributionFactor, const vec3 gamma) {
+	vec3 e = 1.0 / (gamma * gammaContributionFactor);
+	return power(max(rgb, vec3_splat(0.0)), e);
+}
+
+/* fastConvertSRGBToLinear Approximation of convertSRGBToLinear
+ * @rgb Color in linear color space to be converted
+ *
+ * @return Gamma corrected sRGB color space version of the supplied linear color
+ */
+vec3 fastConvertSRGBToLinear(vec3 sRGB) {
+	float e = 2.2;
+	return power(max(sRGB, vec3(0.0, 0.0, 0.0)), vec3(e, e, e));
+}
+
+vec3 color_degamma(vec3 clr, const bool optimizeGammaCorrection) {
+	if (optimizeGammaCorrection) {
+		return fastConvertSRGBToLinear(clr);
+	}
+	else {
+		return convertSRGBToLinear(clr);
+	}
+}
+
+/* color_gamma Applies gamma correction to a color in linear space
+ * @clr Color in linear color space to be converted
+ * @optimizeGammaCorrection true if the approximate conversion should be used
+ * @gammaContributionFactor Value that adjusts the provided gamma
+ * @gamma gamma Value for gamma
+ *
+ * Graph: https://www.desmos.com/calculator/tdpoc9qnma
+ *
+ * @return Gamma corrected sRGB color space version of the supplied linear color
+ */
+vec3 color_gamma(vec3 clr, const bool optimizeGammaCorrection, const float gammaContributionFactor, const vec3 gamma) {
+	if (optimizeGammaCorrection) {
+		// This function takes in the gammaContributionFactor and gamma to avoid calling the "power" function a second time.
+		return fastConvertLinearToSRGB(clr, gammaContributionFactor, gamma);
+	}
+	else {
+		// "power" function is called on the result of convertLinearToSRGB to adjust the curve based on the desired gamma and gammaContributionFactor.
+		return power(convertLinearToSRGB(clr), vec3_splat(2.2f) / (gamma * gammaContributionFactor));
+	}
+}
+
+vec4 color_gamma(vec4 clr, const bool optimizeGammaCorrection, const float gammaContributionFactor, const vec3 gamma) {
+	return vec4(color_gamma(clr.rgb, optimizeGammaCorrection, gammaContributionFactor, gamma), clr.a);
+}
+
+vec4 color_degamma(vec4 clr, const bool optimizeGammaCorrection) {
+	return vec4(color_degamma(clr.rgb, optimizeGammaCorrection), clr.a);
+}
+
+/* getVonKriessRGBtoLMSTransform Returns the transformation matrix to transform from
+ *						 sRGB color space to LMS color space using the Von Kries transformation matrix.
+ *
+ * The transformation is composed of 2 separate transformations:  1 that
+ * converts from sRGB to CIE XYZ and 1 that converts from CIE XYZ to LMS.
+ * Both matrices are normalized to D65 illumination.
+ *
+ * http://www.brucelindbloom.com/index.html?Eqn_RGB_XYZ_Matrix.html
+ * sRGB -> CIE XYZ D65 = {
+ * 	{ 0.4124564, 0.3575761, 0.1804375 },
+ * 	{ 0.2126729, 0.7151522, 0.0721750 },
+ * 	{ 0.0193339, 0.1191920, 0.9503041 }
+ * }
+ *
+ * https://en.wikipedia.org/wiki/LMS_color_space#Hunt.2C_RLAB
+ * CIE XYZ -> LMS D65 = {
+ * 	{  0.4002, 0.7076, -0.0808 },
+ * 	{ -0.2263, 1.1653,  0.0457 },
+ * 	{  0.0,	   0.0,		0.9182 }
+ * }
+ *
+ * Wolframalpha link to do the multiplication and calculate the inverse:
+ * https://www.wolframalpha.com/input/?i=matrix+multiplication&assumption=%7B%22F%22%2C+%22MatricesOperations%22%2C+%22theMatrix2%22%7D+-%3E%22%7B%7B0.4124564%2C0.3575761%2C0.1804375%7D%2C%7B0.2126729%2C0.7151522%2C0.0721750%7D%2C%7B0.0193339%2C0.1191920%2C0.9503041%7D%7D%22&assumption=%7B%22F%22%2C+%22MatricesOperations%22%2C+%22theMatrix1%22%7D+-%3E%22%7B%7B0.4002%2C0.7076%2C-0.0808%7D%2C%7B-0.2263%2C1.1653%2C0.0457%7D%2C%7B0.0%2C0.0%2C0.9182%7D%7D%22&assumption=%7B%22C%22%2C+%22matrix+multiplication%22%7D+-%3E+%7B%22Calculator%22%7D
+ *
+ * NOTE: we are row-major for our matrix memory layout
+ *
+ * @return 3x3 matrix to transform from sRGB color space to LMS color space
+ */
+mat3 getVonKriessRGBtoLMSTransform() {
+	return mtxFromRows(
+		vec3(0.31399022, 0.63951294, 0.04649755),
+		vec3(0.15537241, 0.75789446, 0.08670142),
+		vec3(0.01775239, 0.10944209, 0.87256922)
+	);
+}
+
+/* getVonKriesLMStosRGBTransform Returns the transformation matrix to transform from
+ *						 LMS color space to sRGB color space using the Von Kries transformation matrix.
+ *
+ * This transform is the inverse of getVonKriessRGBtoLMSTransform()
+ *
+ * NOTE: we are row-major for our matrix memory layout
+ *
+ * @return 3x3 matrix to transform from LMS color space to sRGB color space
+ */
+mat3 getVonKriesLMStosRGBTransform() {
+	return mtxFromRows(
+		vec3(5.47221206, -4.6419601,   0.16963708),
+		vec3(-1.1252419,   2.29317094, -0.1678952),
+		vec3(0.02980165, -0.19318073,  1.16364789)
+	);
+}
+
+/* getCAT02sRGBtoLMSTransform Returns the transformation matrix to transform from
+ *						 sRGB color space to LMS color space using the CAT02 transformation matrix.
+ *
+ * The transformation is composed of 2 separate transformations:  1 that
+ * converts from sRGB to CIE XYZ and 1 that converts from CIE XYZ to LMS.
+ * Both matrices are normalized to D65 illumination.
+ *
+ * sRGB -> CIE XYZ D65 = same as the one used by getVonKriessRGBtoLMSTransform()
+
+ * CIE XYZ -> LMS D65 = same as the one return by getCAT02XYZToLMSTransform()
+ *
+ * NOTE: we are row-major for our matrix memory layout
+ *
+ * @return 3x3 matrix to transform from sRGB color space to LMS color space
+ */
+mat3 getCAT02sRGBtoLMSTransform() {
+	return mtxFromRows(
+		vec3(0.390, 0.550, 0.009),
+		vec3(0.071, 0.963, 0.001),
+		vec3(0.023, 0.128, 0.936)
+	 );
+}
+
+/* getCAT02LMStosRGBTransform Returns the transformation matrix to transform from
+ *						 LMS color space to sRGB color space using the inverse CAT02 transformation matrix.
+ *
+ * This transform is the inverse of getCAT02sRGBtoLMSTransform()
+ *
+ * NOTE: we are row-major for our matrix memory layout
+ *
+ * @return 3x3 matrix to transform from LMS color space to sRGB color space
+ */
+mat3 getCAT02LMStosRGBTransform() {
+	return mtxFromRows(
+		vec3(2.859, -1.629, -0.025),
+		vec3(-0.210, 1.158, 0.000),
+		vec3(-0.042, -0.118, 1.069)
+	);
+}
+
+vec3 sRgbToYCbCr( vec3 rgb ) {
+	return vec3(  
+		0.257 * rgb.r + 0.504 * rgb.g + 0.098 * rgb.b,
+	   -0.148 * rgb.r - 0.291 * rgb.g + 0.439 * rgb.b,
+		0.439 * rgb.r - 0.368 * rgb.g - 0.071 * rgb.b
+	);
+}
+
+vec3 yCbCrTosRgb( vec3 yCbCr ) {
+	return vec3( 
+		1.164 * yCbCr.x + 1.596 * yCbCr.z,
+		1.164 * yCbCr.x - 0.392 * yCbCr.y - 0.813 * yCbCr.z,
+		1.164 * yCbCr.x + 2.017 * yCbCr.y
+	);
+}
+
+struct ColorTransform {
+	float hue;
+	float saturation;
+	float luminance;
+};
+
+ColorTransform getColorTransform( vec3 sRgb ) {
+	vec3 yCbCr = sRgbToYCbCr(sRgb);
+	
+	ColorTransform ct;
+	vec2 dir = normalize(yCbCr.yz);
+	ct.hue = atan2( dir.y, dir.x );
+	ct.luminance = yCbCr.x;
+	ct.saturation = length(yCbCr.yz);
+	
+	return ct;
+}
+
+vec3 applyColorTransform( ColorTransform ct ) {
+	float lum = max(ct.luminance, 0.0);
+	vec2 hue = normalize(vec2( cos(ct.hue), sin(ct.hue) ));
+	
+	float maxSat = 1.0/max(max(abs(hue.x), abs(hue.y)), 0.001);
+	float sat = clamp(ct.saturation, 0.0, maxSat);
+
+	vec3 yCbCr = vec3( lum, sat*hue );
+	return yCbCrTosRgb(yCbCr);
+}
+
+vec2 getMotionVector(vec4 curProj, vec4 prevProj) {
+	vec2 v = (curProj.xy / curProj.w) - (prevProj.xy / prevProj.w);
+	v.x *= -1.0;
+	return v;
+}
+
+mat3 getRGBToCIEXYZTransform() {
+	// http://www.brucelindbloom.com/index.html?Eqn_RGB_XYZ_Matrix.html
+	return mtxFromRows(
+		vec3(0.4124564, 0.3575761, 0.1804375),
+		vec3(0.2126729, 0.7151522, 0.0721750),
+		vec3(0.0193339, 0.1191920, 0.9503041)
+	);
+}
+
+mat3 getCIEXYZToRGBTransform() {
+	// Inverse of matrix in getRGBToCIEXYZTransform
+	// http://www.brucelindbloom.com/index.html?Eqn_RGB_XYZ_Matrix.html
+	return mtxFromRows(
+		vec3(3.2404542, -1.5371385, -0.4985314),
+		vec3(0.9692660,  1.8760108,  0.0415560),
+		vec3(0.0556434, -0.2040259,  1.0572252)
+	);
+}
+
+/* getCAT02XYZToLMSTransform Returns the transformation matrix to transform from
+ *                     XYZ color space to LMS color space using the CAT02 transformation matrix.
+ *
+ */
+mat3 getCAT02XYZToLMSTransform() {
+	// https://en.wikipedia.org/wiki/CIECAM02#CAT02
+	return mtxFromRows(
+		vec3(0.7328, 0.4296, -0.1624),
+		vec3(-0.7036, 1.6975, 0.0061),
+		vec3(0.0030, 0.0136, 0.9834)
+	);
+}
+
+vec3 RGBToxyY(vec3 rgb) {
+	// http://www.brucelindbloom.com/index.html?Eqn_XYZ_to_xyY.html
+	mat3 rgbToCIEXYZ = getRGBToCIEXYZTransform();
+	vec3 cieXYZ = mul(rgbToCIEXYZ, rgb);
+	return vec3(
+		cieXYZ.x / (cieXYZ.x + cieXYZ.y + cieXYZ.z + 0.000001),
+		cieXYZ.y / (cieXYZ.x + cieXYZ.y + cieXYZ.z + 0.000001),
+		cieXYZ.y
+	);
+}
+
+/* xyYToXYZ Converts coordinate from xyY to XYZ
+ *
+ * @xyY coordinate in xyY.
+ *
+ * @return coordinate in XYZ.
+ */
+vec3 xyYToXYZ(vec3 xyY) {
+	// http://www.brucelindbloom.com/index.html?Eqn_xyY_to_XYZ.html
+	return vec3(
+		(xyY.x * xyY.z) / xyY.y,
+		xyY.z,
+		((1.0 - xyY.x - xyY.y) * xyY.z) / xyY.y
+	);
+}
+
+/* uvToxyY Converts CIE 1960 to xyY.
+ *
+ * @uv u and v components of a coordinate in CIE 1960.
+ * @Y Illuminance.
+ *
+ * @return coordinate in xyY.
+ */
+vec3 uvToxyY(vec2 uv, float Y) {
+	// https://en.wikipedia.org/wiki/CIE_1960_color_space#:~:text=We%20can%20also%20convert%20from%20u%20and%20v%20to%20x%20and%20y%3A
+	return vec3(vec2(3.0 * uv.x, 2.0 * uv.y) / (2.0 * uv.x - 8.0 * uv.y + 4.0), Y);
+}
+
+vec3 xyYToRGB(vec3 xyY) {
+	vec3 cieXYZ = xyYToXYZ(xyY);
+	mat3 rgbToCIEXYZInv = getCIEXYZToRGBTransform();
+	return mul(rgbToCIEXYZInv, cieXYZ);
+}
+
+vec3 wavelengthToXYZ(float waveLength) {
+	// An analytical expression of CIE marching functions https://www.tandfonline.com/doi/full/10.1080/19475683.2015.1050064
+	vec3 cieXYZ = vec3(
+		0.38 * exp(-0.001369 * pow2(waveLength - 445.0)) + 1.06 * exp(-0.000433 * pow2(waveLength - 595.0)),
+		exp(-0.00028 * pow2(waveLength - 560.0)),
+		1.8 * exp(-0.000916 * pow2(waveLength - 450.0)));
+	return cieXYZ;
+}
+
+float ev100ToLuminance(float ev100) {
+	// https://knarkowicz.wordpress.com/2016/01/09/automatic-exposure/
+	return 0.125f * exp2(ev100);
+}
+
+float luminanceToEV100(float luminance) {
+	// https://knarkowicz.wordpress.com/2016/01/09/automatic-exposure/
+	return log2(luminance) + 3.0f;
+}
+
+/* temperatureTouv Converts temperature to CIE 1960 color space.
+ *
+ * @temp a temperature in Kelvin between 1K and 15K.
+ *
+ * @return a color coordinate in the CIE 1960 color space.
+ */
+vec2 temperatureTouv(float temp) {
+	// https://en.wikipedia.org/wiki/Planckian_locus.
+	const float u = (0.860117757 + 1.54118254 * 1e-4 * temp + 1.28641212 * 1e-7 * temp * temp) /
+		(1.0 + 8.42420235 * 1e-4 * temp + 7.08145163 * 1e-7 * temp * temp);
+	const float v = (0.317398726 + 4.22806245 * 1e-5 * temp + 4.20481691 * 1e-8 * temp * temp) /
+		(1.0 - 2.89741816 * 1e-5 * temp + 1.61456053 * 1e-7 * temp * temp);
+
+	return vec2(u, v);
+}
+
+/* temperatureToXYZ Converts a temperature in Kelvin to a color value in XYZ.
+ *
+ * @temp a temperature in Kelvin between 1K and 15K.
+ * @Y luminance.
+ *
+ * @return coordinate in XYZ.
+ */
+vec3 temperatureToXYZ(float temp, float Y) {
+	return xyYToXYZ(uvToxyY(temperatureTouv(temp), Y));
+}

@@ -1,0 +1,23 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+MaterialDefinition "BaseInjectionMaterial"
+{
+	Properties 
+	{
+		[Float] BaseFloat : 2.0
+		[Vector] BaseVector : (1,1,1,1)
+	}
+
+	Standard
+	{
+		[Option] SurfaceFunction : Surf
+		[Option] Lighting : Unlit
+
+		Shader:Standard
+		{
+			void Surf(in StandardSurfaceInput surfaceInput, inout StandardSurfaceOutput surfaceOutput) {
+			}
+		}
+	}
+}

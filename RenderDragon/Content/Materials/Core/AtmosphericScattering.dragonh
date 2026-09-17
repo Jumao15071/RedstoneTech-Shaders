@@ -1,0 +1,104 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+#pragma once
+
+#include "Util/ColorUtil.dragonh"
+
+float calculateFogIntensity(float cameraDepth, float fogStart, float fogEndMinusStartReciprocal) {
+	return saturate((cameraDepth - fogStart) * fogEndMinusStartReciprocal);
+}
+
+float calculateFogIntensityFaded(float cameraDepth, float maxDistance, float fogStart, float fogEndMinusStartReciprocal, float fogAlpha) {
+	float distance = cameraDepth / maxDistance;
+	distance += fogAlpha;
+	return saturate((distance - fogStart) * fogEndMinusStartReciprocal);
+}
+
+vec3 applyFog(vec3 diffuse, vec3 fogColor, float fogIntensity) {
+	return mix(diffuse, fogColor, fogIntensity);
+}
+
+float getHorizonBlend(float start, float end, float x) {
+	float horizon = smoothstep(start, end, x);
+	horizon = pow3(horizon);
+	return saturate(horizon);
+}
+
+// Rayleigh phase function is a simplification of the generic phase function where g = 0
+// Source: https://developer.nvidia.com/gpugems/gpugems2/part-ii-shading-lighting-and-shadows/chapter-16-accurate-atmospheric-scattering
+float getRayleighPhase(float VdL) {
+	float phase = 0.75f * (VdL * VdL + 1.0);
+	return phase;
+}
+
+struct AtmosphereParams {
+	vec3 sunDir;
+	vec3 moonDir;
+	vec4 sunColor;
+	vec4 moonColor;
+	vec3 skyZenithColor;
+	vec3 skyHorizonColor;
+	vec4 fogColor;
+
+	float horizonBlendMin;
+	float horizonBlendStart;
+	float mieStart;
+	float horizonBlendMax;
+
+	float rayleighStrength;
+	float sunMieStrength;
+	float moonMieStrength;
+	float sunGlareShape;
+};
+
+vec3 calculateRayleighBaseSkyColor(AtmosphereParams params, vec3 V) {
+	float startHorizon = params.horizonBlendStart;
+	float endHorizon = params.horizonBlendMin - params.horizonBlendMax;
+	float horizon = getHorizonBlend(startHorizon, endHorizon, V.y);
+
+	vec3 zenithColor = params.skyZenithColor;
+	vec3 horizonColor = params.skyHorizonColor;
+
+	return mix(zenithColor, horizonColor, horizon);
+}
+
+vec3 calculateSkyColor(AtmosphereParams params, vec3 V) {
+	float endHorizon = params.horizonBlendMin - params.horizonBlendMax;
+	float mieStartHorizon = params.mieStart - params.horizonBlendMax;
+
+	vec3 sunColor = params.sunColor.a * params.sunColor.rgb;
+	vec3 moonColor = params.moonColor.a * params.moonColor.rgb;
+
+	// Calculate a separate horizon value for the mie sun glare, which allows for an arc to be created on the
+	// horizon during sunset or sunrise.
+	float mieHorizon = getHorizonBlend(mieStartHorizon, endHorizon, V.y);
+
+	const float kOneOverFourPi = (1.0 / (4.0 * M_PI));
+	float sunVdL = dot(V, params.sunDir);
+	float moonVdL = dot(V, params.moonDir);
+	
+	float rayleighSun = params.sunColor.a * getRayleighPhase(sunVdL);
+	float rayleighMoon = params.moonColor.a * getRayleighPhase(moonVdL);
+	vec3 rayleighColor = params.rayleighStrength * calculateRayleighBaseSkyColor(params, V);
+	vec3 rayleigh = kOneOverFourPi * rayleighColor * (rayleighSun + rayleighMoon);
+
+	float miePower = params.sunGlareShape;
+	float mieSunVdL = saturate(power(max(sunVdL, 0.0), miePower));
+	float mieMoonVdL = saturate(power(max(moonVdL, 0.0), miePower));
+	
+	const float kMieEccentricity = -0.9;
+	const float kTwoMieEccentricity = kMieEccentricity * 2.0;
+	const float kSquaredMieEccentricity = kMieEccentricity * kMieEccentricity;
+	const float kOnePlusSquaredMieEccentricity = 1.0 + kSquaredMieEccentricity;
+	const float kSquaredInverseSquaredMieEccentricity = (1.0 - kSquaredMieEccentricity) * (1.0 - kSquaredMieEccentricity);
+	float sunPhase = kSquaredInverseSquaredMieEccentricity / pow1_5(kOnePlusSquaredMieEccentricity - kTwoMieEccentricity * -mieSunVdL);
+	float moonPhase = kSquaredInverseSquaredMieEccentricity / pow1_5(kOnePlusSquaredMieEccentricity - kTwoMieEccentricity * -mieMoonVdL);
+
+	vec3 mieSun = params.sunMieStrength * sunColor * mieSunVdL * sunPhase;
+	vec3 mieMoon = params.moonMieStrength * moonColor * mieMoonVdL * moonPhase;
+	vec3 mieColor = params.skyHorizonColor * mieHorizon;
+	vec3 mie = kOneOverFourPi * mieColor * (mieSun + mieMoon);
+
+	return rayleigh + mie;
+}

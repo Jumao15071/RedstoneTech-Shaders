@@ -1,0 +1,78 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+#pragma once
+
+// Convert pixel coordinates to UV coordinates
+vec2 pixelToUV(in vec2 pixel, vec4 resAndRecipRes) {
+	return pixel * resAndRecipRes.zw;
+}
+
+// Convert UV coordinates to unrounded pixel coordinates
+vec2 uvToPixel(in vec2 uv, vec4 resAndRecipRes) {
+	return uv * resAndRecipRes.xy;
+}
+
+// Snap the UV to the nearest pixel and return the pixel coordinates
+vec2 snapUVToPixel(in vec2 uv, vec4 resAndRecipRes) {
+	return floor(uvToPixel(uv, resAndRecipRes));
+}
+
+// Snap the UV to the nearest pixel and return the UV coordinates
+vec2 snapUV(in vec2 uv, vec4 resAndRecipRes) {
+	return snapUVToPixel(uv, resAndRecipRes) * resAndRecipRes.zw;
+}
+
+// Snap the UV to the top-left corner pixel of a 2x2 quad and return the pixel coordinates
+vec2 snapUVToQuadPixel(in vec2 uv, vec4 resAndRecipRes) {
+	return floor(uvToPixel(uv, resAndRecipRes) * 0.5) * 2.0;
+}
+
+// Snap the UV to the top-left corner pixel of a 2x2 quad and return the UV coordinates
+vec2 snapUVToQuad(in vec2 uv, vec4 resAndRecipRes) {
+	return snapUVToQuadPixel(uv, resAndRecipRes) * resAndRecipRes.zw;
+}
+
+// Snap the UV to the center of a pixel and return the pixel coordinates
+vec2 centerUVToPixel(in vec2 uv, vec4 resAndRecipRes) {
+	return snapUVToPixel(uv, resAndRecipRes) + 0.5;
+}
+
+// Snap the UV to the center of a pixel and return the UV coordinates
+vec2 centerUV(in vec2 uv, vec4 resAndRecipRes) {
+	return centerUVToPixel(uv, resAndRecipRes) * resAndRecipRes.zw;
+}
+
+// Snap the UV to the center of the top-left corner pixel of a 2x2 quad and return the pixel coordinates
+vec2 centerUVToQuadPixel(in vec2 uv, vec4 resAndRecipRes) {
+	return floor(uvToPixel(uv, resAndRecipRes) - 0.5) + 0.5;
+}
+
+// Snap the UV to the center of the top-left corner pixel of a 2x2 quad and return the UV coordinates
+vec2 centerUVToQuad(in vec2 uv, vec4 resAndRecipRes) {
+	return centerUVToQuadPixel(uv, resAndRecipRes) * resAndRecipRes.zw;
+}
+
+// Returns 1.0 at even pixel coordinates, 0.0 at odd pixel coordinates in a checkerboard pattern
+float checkerboardPixel(in vec2 pixel) {
+	pixel = floor(pixel);
+	return mod(sum2(pixel), 2.0);
+}
+
+// Returns 1.0 at even pixel coordinates, 0.0 at odd pixel coordinates in a checkerboard pattern
+float checkerboardUV(in vec2 uv, vec4 resAndRecipRes) {
+	return checkerboardPixel(uvToPixel(uv, resAndRecipRes));
+}
+
+// Returns the Mip-Map Lod level for a given texture and UV
+float getMipLod(sampler2D tex, vec2 uv) {
+	vec2 texCoords = uv * vec2(textureSize(tex, 0).xy);
+	vec2 texCoordDX = dFdx(texCoords);
+	vec2 texCoordDY = dFdy(texCoords);
+
+	// Rearranging log2(max(length(dX), length(dY))) to avoid sqrt
+	float mipLod = 0.5 * log2(max(lengthSqr(texCoordDX), lengthSqr(texCoordDY)));
+
+	// Clamp to 0 to avoid negative Lod
+	return max(0.0, mipLod);
+}

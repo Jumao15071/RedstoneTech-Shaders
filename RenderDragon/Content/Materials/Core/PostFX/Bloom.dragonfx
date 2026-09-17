@@ -1,0 +1,163 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+MaterialDefinition "Bloom" : "PostFX"
+{
+	Properties
+	{
+		[Sampler:2D] HDRi
+		[Sampler:2D] BlurPyramidTexture
+		[Sampler:2D] AverageLuminance
+		[Vector] BloomParams : (0.5, 0.0, 0.0, 0.0) // intensity, threshold, unused, unused
+		[Vector] ViewportScale : (1.0, 1.0, 0.0, 0.0)
+	}
+
+	Shared
+	{
+		Code
+		{
+			#define LuminanceThreshold BloomParams.y
+
+			#include "Util/ColorUtil.dragonh"
+
+			vec2 GetMaxUV(vec2 srcSize) {
+				vec2 srcViewSize = floor(srcSize * ViewportScale.xy);
+				return (srcViewSize - 0.5) / srcSize;
+			}
+
+			vec4 ApplyThreshold(vec4 color, float threshold) {
+				return color * step(threshold, luminance( color.rgb ));
+			}
+
+			vec4 ThresholdedDualFilterDownsample( sampler2D srcImg, vec2 uv, vec2 maxUV, vec2 pixelOffsets, float threshold)
+			{
+				vec4 col = vec4(0, 0, 0, 0);
+
+				col += 0.5 * ApplyThreshold(texture2D( srcImg, min(uv, maxUV) ), threshold);
+				col += 0.125 * ApplyThreshold(texture2D( srcImg, min(uv + vec2( pixelOffsets.x,   pixelOffsets.y), maxUV) ), threshold);
+				col += 0.125 * ApplyThreshold(texture2D( srcImg, min(uv + vec2(-pixelOffsets.x,   pixelOffsets.y), maxUV) ), threshold);
+				col += 0.125 * ApplyThreshold(texture2D( srcImg, min(uv + vec2( pixelOffsets.x,  -pixelOffsets.y), maxUV) ), threshold);
+				col += 0.125 * ApplyThreshold(texture2D( srcImg, min(uv + vec2(-pixelOffsets.x,  -pixelOffsets.y), maxUV) ), threshold);
+			
+				return col;
+			}
+
+			vec4 DualFilterDownsample( sampler2D srcImg, vec2 uv, vec2 maxUV, vec2 pixelOffsets )
+			{
+				vec4 col = vec4(0, 0, 0, 0);
+
+				col += 0.5 * texture2D( srcImg, min(uv, maxUV) );
+				col += 0.125 * texture2D( srcImg, min(uv + vec2( pixelOffsets.x,   pixelOffsets.y), maxUV) );
+				col += 0.125 * texture2D( srcImg, min(uv + vec2(-pixelOffsets.x,   pixelOffsets.y), maxUV) );
+				col += 0.125 * texture2D( srcImg, min(uv + vec2( pixelOffsets.x,  -pixelOffsets.y), maxUV) );
+				col += 0.125 * texture2D( srcImg, min(uv + vec2(-pixelOffsets.x,  -pixelOffsets.y), maxUV) );
+			
+				return col;
+			}
+
+			vec4 DualFilterUpsample( sampler2D srcImg, vec2 uv, vec2 maxUV, vec2 pixelOffsets )
+			{
+				vec4 col = vec4(0, 0, 0, 0);
+			
+				col += 0.166 * texture2D( srcImg, min(uv + vec2( 0.5*pixelOffsets.x,  0.5*pixelOffsets.y), maxUV) );
+				col += 0.166 * texture2D( srcImg, min(uv + vec2(-0.5*pixelOffsets.x,  0.5*pixelOffsets.y), maxUV) );
+				col += 0.166 * texture2D( srcImg, min(uv + vec2( 0.5*pixelOffsets.x, -0.5*pixelOffsets.y), maxUV) );
+				col += 0.166 * texture2D( srcImg, min(uv + vec2(-0.5*pixelOffsets.x, -0.5*pixelOffsets.y), maxUV) );
+				col += 0.083 * texture2D( srcImg, min(uv + vec2( pixelOffsets.x,  pixelOffsets.y), maxUV) );
+				col += 0.083 * texture2D( srcImg, min(uv + vec2(-pixelOffsets.x,  pixelOffsets.y), maxUV) );
+				col += 0.083 * texture2D( srcImg, min(uv + vec2( pixelOffsets.x, -pixelOffsets.y), maxUV) );
+				col += 0.083 * texture2D( srcImg, min(uv + vec2(-pixelOffsets.x, -pixelOffsets.y), maxUV) );
+				
+				return col;
+			}
+		}
+	}
+
+	Pass "ThresholdedDownSample"
+	{
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+
+		Shader : Custom
+		{
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput)
+			{
+				vec2 texelOffset = 2.0 / ViewportScale.zw;
+				vec2 pixelOffset = 1.5 * ViewportScale.xy * texelOffset;
+				vec2 uv = fragInput.texcoord0.xy;
+				vec2 maxUV = GetMaxUV(ViewportScale.zw);
+
+				fragOutput.Color0 = ThresholdedDualFilterDownsample(
+					BlurPyramidTexture,
+					uv,
+					maxUV,
+					pixelOffset,
+					LuminanceThreshold * texture2D(AverageLuminance, vec2(0.5f, 0.5f)).r
+				);
+			}
+		}
+	}
+
+	Pass "DFDownSample"
+	{
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+
+		Shader : Custom
+		{
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput)
+			{
+				vec2 texelOffset = 2.0 / ViewportScale.zw;
+				vec2 pixelOffset = 1.5 * ViewportScale.xy * texelOffset;
+				vec2 uv = fragInput.texcoord0.xy;
+				vec2 maxUV = GetMaxUV(ViewportScale.zw);
+
+				fragOutput.Color0 = DualFilterDownsample( BlurPyramidTexture, uv, maxUV, pixelOffset );
+			}
+		}
+	}
+	
+	Pass "DFUpSample"
+	{
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+
+		Shader : Custom
+		{
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput)
+			{
+				vec2 texelOffset = 0.5 / ViewportScale.zw;
+				vec2 pixelOffset = 4.0 * ViewportScale.xy * texelOffset;
+				vec2 uv = fragInput.texcoord0.xy;
+				vec2 maxUV = GetMaxUV(ViewportScale.zw);
+
+				fragOutput.Color0 = DualFilterUpsample( BlurPyramidTexture, uv, maxUV, pixelOffset );
+			}
+		}
+	}
+	
+	Pass "BloomBlend"
+	{
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+
+		Shader : Custom
+		{
+			#define BloomIntensity BloomParams.x
+
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput)
+			{
+				vec2 texelOffset = 0.5 / ViewportScale.zw;
+				vec2 pixelOffset = 4.0 * ViewportScale.xy * texelOffset;
+				vec2 uv = fragInput.texcoord0.xy;
+				vec2 maxUV = GetMaxUV(ViewportScale.zw);
+
+				vec4 bloom = DualFilterUpsample( BlurPyramidTexture, uv, maxUV, pixelOffset );
+				vec3 baseColor = texture2D(HDRi, uv).rgb;
+
+				vec3 bloomedColor = baseColor + (BloomIntensity * bloom.rgb);
+				fragOutput.Color0 = vec4(bloomedColor, 1.0 );
+			}
+		}
+	}
+}

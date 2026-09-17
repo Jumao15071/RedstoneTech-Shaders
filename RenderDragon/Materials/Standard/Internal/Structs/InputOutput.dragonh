@@ -1,0 +1,65 @@
+/********************************************************
+*  (c) Mojang.    All rights reserved.                  *
+*  (c) Microsoft. All rights reserved.                  *
+*********************************************************/
+
+#pragma once
+
+struct StandardSurfaceInput {
+	vec2 UV;
+	vec3 Color;
+	float Alpha;
+
+	{{{userAdditionalFragmentInput}}}
+};
+
+struct StandardVertexInput {
+	VertexInput vertInput;
+	
+	vec3 worldPos;
+};
+
+StandardSurfaceInput StandardTemplate_DefaultInput(FragmentInput fragInput) {
+	StandardSurfaceInput result;
+
+	result.UV = vec2(0,0);
+	result.Color = vec3(1,1,1);
+	result.Alpha = 1.0;
+
+	{{#userAdditionalFragmentInputDefaultInputs}}
+		result.{{name}} = fragInput.{{name}};
+	{{/userAdditionalFragmentInputDefaultInputs}}
+
+	return result;
+}
+
+struct StandardSurfaceOutput {
+	vec3 Albedo;
+	float Alpha;
+
+	float Metallic;
+	float Roughness;
+	float Occlusion;
+	float Emissive;
+	float Subsurface;
+	vec3 AmbientLight;
+
+	vec3 ViewSpaceNormal;
+};
+
+StandardSurfaceOutput StandardTemplate_DefaultOutput() {
+	StandardSurfaceOutput result;
+
+	result.Albedo = vec3(1,1,1);
+	result.Alpha = 1.0;
+
+	result.Metallic = 0.0;
+	result.Roughness = 1.0;
+	result.Occlusion = 0.0;
+	result.Emissive = 0.0;
+	result.Subsurface = 0.0;
+	result.AmbientLight = vec3(0.0, 0.0, 0.0);
+	result.ViewSpaceNormal = vec3(0, 1, 0);
+
+	return result;
+}

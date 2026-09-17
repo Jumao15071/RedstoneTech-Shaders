@@ -1,0 +1,283 @@
+MaterialDefinition "Upscaling"
+{
+	Properties
+	{
+		[Sampler:2D] InputFinalColor
+		[Sampler:2D] InputTAAHistory
+		[Sampler:2D] InputBufferMotionVectors // RG: Normals, BA: Motion Vectors
+		
+		[Vector] SubPixelJitterAndValidHistory : (0,0,0,0)
+		[Vector] RenderResolution : (0,0,0,0)
+		[Vector] DisplayResolution : (0,0,0,0)
+		[Vector] RecipDisplayResolution : (0,0,0,0)
+		[Vector] ResolutionRatiosAndFPEpsilon : (0,0,0,0)
+		[Vector] TAAUpscalingParameters : (0,0,0,0)
+
+		[Matrix:4x4] PreviousViewProjectionMatrixUniform
+		[Matrix:4x4] CurrentViewProjectionMatrixUniform
+		[Vector] CurrentWorldOrigin
+		[Vector] PreviousWorldOrigin
+	}
+
+	Shared
+	{
+		Declaration
+		{
+			[VertexInput:vec3] position : POSITION
+			[VertexInput:vec2] texcoord0 : TEXCOORD0
+
+			[FragmentInput:vec2] texcoord0 : TEXCOORD0
+		}
+	}
+
+	Pass "TAAU"
+	{
+		[Option] GraphicsProfile : HiDef
+		
+		[Option] Fallback : Fallback
+
+		[Option] VertexFunction : UpscalingVert
+		[Option] FragmentFunction : UpscalingFrag
+
+		Shader : Custom
+		{
+			#define VarianceClippingBiasMin TAAUpscalingParameters.x
+			#define VarianceClippingBiasMax TAAUpscalingParameters.y
+			#define EnableColorClipping bool(TAAUpscalingParameters.z)
+			#define EnableMotionVectorFiltering bool(TAAUpscalingParameters.w)
+
+			#define SubPixelJitter vec2(SubPixelJitterAndValidHistory.xy)
+			#define IsHistoryValid bool(SubPixelJitterAndValidHistory.z)
+
+			#define RenderResolutionDivDisplayResolution ResolutionRatiosAndFPEpsilon.x
+			#define DisplayResolutionDivRenderResolution ResolutionRatiosAndFPEpsilon.y
+			#define UpscalingFPEpsilon ResolutionRatiosAndFPEpsilon.z
+
+			vec2 computeMotionVectorForEnvironment(vec3 pixelWorldPos, mat4 currentViewProj, mat4 previousViewProj, vec3 currentWorldOrigin, vec3 previousWorldOrigin)
+			{
+				vec4 clipPos = mul(currentViewProj, vec4(pixelWorldPos, 0.0));
+				vec3 previousPixelWorldPosition = pixelWorldPos + currentWorldOrigin - previousWorldOrigin;
+				vec4 prevClipPos = mul(previousViewProj, vec4(previousPixelWorldPosition, 0.0));
+			
+				if(clipPos.w <= 0.0 || prevClipPos.w <= 0.0) {
+					return vec2(0.0, 0.0);
+				}
+				
+				vec2 ndcPos = clipPos.xy / clipPos.ww;
+				vec2 prevNdcPos = prevClipPos.xy / prevClipPos.ww;
+			
+				vec2 currentToPreviousNdcXy = prevNdcPos - ndcPos;
+				return currentToPreviousNdcXy * vec2(0.5f, -0.5f); // express as UV difference
+			}
+
+			vec3 bicubicSampleCatmullRom(sampler2D tex, vec2 samplePos, vec2 recipTextureResolution)
+			{
+				vec2 tc = floor(samplePos - 0.5) + 0.5;
+				vec2 f = clamp(samplePos - tc, 0.0, 1.0);
+				vec2 f2 = f * f;
+				vec2 f3 = f2 * f;
+			
+				vec2 w0 = f2 - 0.5 * (f3 + f);
+				vec2 w1 = 1.5 * f3 - 2.5 * f2 + 1.0;
+				vec2 w3 = 0.5 * (f3 - f2);
+				vec2 w2 = 1.0 - w0 - w1 - w3;
+			
+				vec2 w12 = w1 + w2;
+			
+				vec2 tc0 = (tc - 1.0) * recipTextureResolution;
+				vec2 tc12 = (tc + w2 / w12) * recipTextureResolution;
+				vec2 tc3 = (tc + 2.0) * recipTextureResolution;
+			
+				vec3 result =
+					texture2DLod(tex, vec2(tc0.x,  tc0.y),  0.0).rgb * (w0.x  * w0.y) +
+					texture2DLod(tex, vec2(tc0.x,  tc12.y), 0.0).rgb * (w0.x  * w12.y) +
+					texture2DLod(tex, vec2(tc0.x,  tc3.y),  0.0).rgb * (w0.x  * w3.y) +
+					texture2DLod(tex, vec2(tc12.x, tc0.y),  0.0).rgb * (w12.x * w0.y) +
+					texture2DLod(tex, vec2(tc12.x, tc12.y), 0.0).rgb * (w12.x * w12.y) +
+					texture2DLod(tex, vec2(tc12.x, tc3.y),  0.0).rgb * (w12.x * w3.y) +
+					texture2DLod(tex, vec2(tc3.x,  tc0.y),  0.0).rgb * (w3.x  * w0.y) +
+					texture2DLod(tex, vec2(tc3.x,  tc12.y), 0.0).rgb * (w3.x  * w12.y) +
+					texture2DLod(tex, vec2(tc3.x,  tc3.y),  0.0).rgb * (w3.x  * w3.y);
+			
+				return max(vec3(0.0, 0.0, 0.0), result);
+			}
+
+			float sampleWeight(vec2 delta, float scale)
+			{
+				float x = scale * dot(delta, delta);
+				return clamp(1.0 - x, 0.05, 1.0);
+			}
+
+			// This function clips the previousColor to the point at wich the ray from previousColor to currentColor
+			// enters the AABB that is created by minValidColor and maxValidColor
+			// We find this point using the slab method for AABB/Ray intersection.
+			// The slab method is well documented, thorough explanations can be found on page 959 of Real-Time Rendering Fourth Edition or online
+			// The idea behind the slab method is that each dimension of the AABB has a min and a max value.
+			// The range between the min and max of each dimension is called a slab.
+			// The first point on the ray which has crossed all three minimum slab values, but none of the max slab values is the first point of collision.
+			// If a maximum slab value is crossed before all minimum values are crossed, there is no intersection.
+			// The length of the ray where it enters the AABB is given by the largest tMin value while the exit length is given by the smallest tMax value.
+			vec3 clipColor(vec3 minValidColor, vec3 maxValidColor, vec3 previousColor, vec3 currentColor) {
+				// Our ray is defined by the function f(t) = rayOrigin + t * rayDirection
+				vec3 rayOrigin = previousColor;
+				vec3 rayDirection = currentColor - previousColor;
+				// Normalizing zero vector leads to NaNs so make sure it has a positive length
+				// Manually normalizing so we only call length() once
+				float rayLength = length(rayDirection);
+				if(rayLength > 0.0f){
+					rayDirection = vec3(rayDirection.x / rayLength, rayDirection.y / rayLength, rayDirection.z / rayLength);
+				}
+
+				// These are arbitrary starting max/min values
+				float tMin = -65000.f;
+				float tMax = 65000.f;
+
+				vec3 clampedColor = min(maxValidColor, max(minValidColor, previousColor));
+				bool returnClamped = false;
+
+				for(int i = 0; i < 3; i++) {
+					if(abs(rayDirection[i]) > UpscalingFPEpsilon) {
+						// Find the two values of t where the ray hits the max and min slab values
+						float t1 = (minValidColor[i] - rayOrigin[i]) / rayDirection[i];
+						float t2 = (maxValidColor[i] - rayOrigin[i]) / rayDirection[i];
+
+						// Ensure the lesser t value is in t1, otherwise swap the values
+						if(t1 > t2) {
+							float tempT1 = t1;
+							t1 = t2;
+							t2 = tempT1;
+						}
+
+						// The largest tMin defines the ray's entry point into the AABB while the smallest tMax defines the exit point
+						// Store t1 into tMin or t2 into tMax if a new largest or smallest value is found, respectively
+						if(t1 > tMin) tMin = t1;
+						if(t2 < tMax) tMax = t2;
+
+						// These are situations where no collision is occurring, let's fall back on clamping
+						if (tMin > tMax) returnClamped = true;
+						if (tMax < 0.f)  returnClamped = true;
+
+					} else if (rayOrigin[i] < minValidColor[i] || rayOrigin[i] > maxValidColor[i]) {
+						returnClamped = true;
+					}
+				}
+
+				vec3 outColor = clampedColor;
+
+				if(!returnClamped)
+				{
+					if(tMin > 0.f) {
+						outColor = rayOrigin + rayDirection * vec3_splat(tMin);
+					} else {
+						outColor = rayOrigin + rayDirection * vec3_splat(tMax);
+					}
+				}
+
+				return outColor;
+			}
+
+			void UpscalingVert(VertexInput vertInput, inout VertexOutput vertOutput) {
+				vertOutput.position = vec4(vertInput.position, 1.0);
+				vertOutput.position.xy = vertOutput.position.xy * 2.0 - 1.0;
+				vertOutput.texcoord0 = vertInput.texcoord0;
+			}
+			
+			void UpscalingFrag(FragmentInput fragInput, inout FragmentOutput fragOutput)
+			{
+				vec2 coords = DisplayResolution.xy * fragInput.texcoord0;
+				highp uint x = uint(coords.x);
+				highp uint y = uint(coords.y);
+			
+				// Calculate position in the render buffer (at the lower render resolution)
+#if !BGFX_SHADER_LANGUAGE_GLSL
+				vec2 nearestRenderPos = vec2(float(x) + 0.5f, float(y) + 0.5f) * RenderResolutionDivDisplayResolution - SubPixelJitter.xy - 0.5f;
+#else
+				vec2 nearestRenderPos = vec2(float(x) + 0.5f, float(y) + 0.5f) * RenderResolutionDivDisplayResolution - vec2(SubPixelJitter.x, -SubPixelJitter.y) - 0.5f;
+#endif
+				ivec2 intRenderPos = ivec2(round(nearestRenderPos.x), round(nearestRenderPos.y));
+
+				vec4 currentColor = texelFetch(InputFinalColor, intRenderPos, 0).rgba;
+				vec2 motionPixels = texelFetch(InputBufferMotionVectors, intRenderPos, 0).ba;
+
+#if !BGFX_SHADER_LANGUAGE_GLSL
+				motionPixels.y *= -1.0;
+#endif
+			
+				vec3 c1 = currentColor.rgb;
+				vec3 c2 = currentColor.rgb * currentColor.rgb;
+				for (int i = -1; i <= 1; i++)
+				{
+					for (int j = -1; j <= 1; j++)
+					{
+						if (i == 0 && j == 0)
+							continue;
+				
+						ivec2 p = intRenderPos + ivec2(i, j);
+				
+						vec3 c = texelFetch(InputFinalColor, p, 0).rgb;
+						vec2 mv = texelFetch(InputBufferMotionVectors, p, 0).ba;
+						c1 = c1 + c;
+						c2 = c2 + c * c;
+
+						if(EnableMotionVectorFiltering) {
+							// This is producing some weird effects
+							if (dot(mv, mv) > dot(motionPixels, motionPixels))
+							{
+								motionPixels = mv;
+							}
+						}
+						
+					}
+				}
+
+
+				motionPixels *= RenderResolution.xy;
+			
+				c1 = c1 / 9.0f;
+				c2 = c2 / 9.0f;
+				vec3 extent = sqrt(max(vec3(0.0, 0.0, 0.0), c2 - c1 * c1));
+				float motionWeight = smoothstep(0.0, 1.0f, sqrt(dot(motionPixels, motionPixels)));
+				float bias = mix(VarianceClippingBiasMax, VarianceClippingBiasMin, motionWeight);
+				vec3 minValidColor = c1 - extent * bias;
+				vec3 maxValidColor = c1 + extent * bias;
+
+				vec2 posPreviousPixels = vec2(float(x) + 0.5f, float(y) + 0.5f) - motionPixels * DisplayResolutionDivRenderResolution;
+				posPreviousPixels = clamp(posPreviousPixels, vec2(0, 0), DisplayResolution.xy - 1.0f);
+
+				vec3 prevColor = bicubicSampleCatmullRom(InputTAAHistory, posPreviousPixels, RecipDisplayResolution.xy);
+
+				if(EnableColorClipping){
+					if(any(greaterThan(prevColor, maxValidColor)) || any(lessThan(prevColor, minValidColor))) {
+						prevColor = clipColor(minValidColor, maxValidColor, prevColor, currentColor.rgb);
+					}
+				} else {
+					prevColor = min(maxValidColor, max(minValidColor, prevColor));
+				}
+
+				float pixelWeight = max(motionWeight, sampleWeight(nearestRenderPos - vec2(intRenderPos), DisplayResolutionDivRenderResolution)) * 0.1f;
+				pixelWeight = IsHistoryValid ? pixelWeight : 1.0;
+				vec3 finalColor = mix(prevColor, currentColor.rgb, pixelWeight);
+
+				fragOutput.Color0 = vec4(finalColor, 0.0);
+			}
+		}
+		
+	}
+
+	
+		
+	Pass "Fallback" {
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+
+		Shader: Custom{
+			void Vert(VertexInput vertInput, inout VertexOutput vertOutput) {
+			}
+
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				fragOutput.Color0 = vec4(0.0, 0.0, 0.0, 0.0);
+			}
+		}
+	}
+	
+}

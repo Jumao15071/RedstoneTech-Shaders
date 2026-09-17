@@ -1,0 +1,35 @@
+/********************************************************
+*  (c) Mojang.    All rights reserved.                  *
+*  (c) Microsoft. All rights reserved.                  *
+*********************************************************/
+
+MaterialDefinition "RTXPostFX"
+{
+	Properties
+	{
+		[Sampler:2D] RasterColor
+		[Vector] ScreenSize // xy = size, zw = 1 / size
+		[Float] RenderMode : 0.0
+	}
+
+	Shared
+	{
+		Declaration
+		{
+			[VertexInput:vec4] position : POSITION
+			[VertexInput:vec2] texcoord0 : TEXCOORD0
+			[FragmentInput:vec2] texcoord0 : TEXCOORD0
+		}
+
+		Code
+		{
+			#include "RTXPostFX.dragonh"
+			#include "Util/NormalConversionUtil.dragonh"
+
+			void Vert(VertexInput vertInput, inout VertexOutput vertOutput) {
+				vertOutput.position = vec4(vertInput.position.xy * 2.0 - 1.0, 0.0, 1.0);
+				vertOutput.texcoord0 = vec2(vertInput.texcoord0.x, vertInput.texcoord0.y);
+			}
+		}
+	}
+}

@@ -1,0 +1,43 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+MaterialDefinition "CustomTestMaterial"
+{
+	Types
+	{
+		$import "CustomTypes.dragonprop"
+	}
+
+	Pass "Transparent" {
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Surf
+
+		Shader:Custom
+		{
+			#include "Utils.dragonh"
+			void Vert(VertexInput vertInput, inout VertexOutput vertOutput) {
+			}
+
+			void Surf(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				fragOutput.Color0 = testFunction(vec4(1.0, 0.0, 0.0, 0.0));
+			}
+		}
+	}
+
+	Pass "Opaque" {
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Surf
+
+		Shader:Custom
+		{
+			#include "Utils.dragonh"
+			void Vert(VertexInput vertInput, inout VertexOutput vertOutput) {
+			}
+
+			void Surf(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				fragOutput.Color0 = testFunction(vec4(1.0, 1.0, 1.0, 1.0));
+			}
+		}
+	}
+
+}

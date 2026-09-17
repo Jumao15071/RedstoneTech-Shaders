@@ -1,0 +1,222 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+MaterialDefinition "BilateralGrid"
+{
+	Types
+	{
+		GridCell
+		{
+			[uint] weight
+			[uint] value
+		}
+	}
+
+	Properties
+	{
+		[Sampler:2D] SceneColor
+		[RWStructuredBuffer:GridCell] BilateralGrid
+		[WTexture:3D:rgba16f] FilteredBilateralGridOutput
+		[Vector] GridDimensions // grid width, grid height, grid depth, unused
+		[Vector] SceneResolutionAndRecipSceneResolution // scene width, scene height, 1 / scene width, 1 / scene height
+		[Vector] LuminanceRangeParams // min log luminance, max log luminance, min linear luminance, max linear luminance
+		[Vector] BilateralFilterParams // filter radius, unused, unused, unused
+
+		[Sampler:2D] AverageLuminance
+		[Sampler:2D] PreviousFrameAverageLuminance
+		[Float] PreExposureEnabled
+	}
+
+	Shared
+	{
+		Code
+		{
+			// The bilateral grid stores values in 24.8 fixed point
+			CONST(float kFixedPointScaleFactor) = float(1 << 8);
+			CONST(float kFixedPointScaleFactorRecip) = 1.0f / float(1 << 8);
+
+			// Compute the index in the bilateral grid buffer given a set of coordinates
+			uint indexFromCoords(uvec3 dimensions, uvec3 coords) {
+				return coords.z * dimensions.x * dimensions.y + coords.y * dimensions.x + coords.x;
+			}
+		}
+	}
+
+	Pass "ClearBilateralGrid"
+	{
+		[Flag] ThreadLimit : LimitedAt128, LimitedAt256, Native
+
+		[Option] GraphicsProfile : HiDef
+		[Option] Fallback : Fallback
+
+		[Option] KernelFunction : ClearGrid
+		[Option] Threads : "THREADS_X, THREADS_Y, THREADS_Z"
+
+		Shader : Compute
+		{
+		#if flag(ThreadLimit, LimitedAt128)
+			#define THREADS_X 8
+			#define THREADS_Y 8
+			#define THREADS_Z 2
+		#elif flag(ThreadLimit, LimitedAt256)
+			#define THREADS_X 8
+			#define THREADS_Y 8
+			#define THREADS_Z 4
+		#else
+			#define THREADS_X 8
+			#define THREADS_Y 8
+			#define THREADS_Z 8
+		#endif
+
+			void ClearGrid() {
+				uint x = GlobalInvocationID.x;
+				uint y = GlobalInvocationID.y;
+				uint z = GlobalInvocationID.z;
+
+				if (x < uint(GridDimensions.x) && y < uint(GridDimensions.y) && z < uint(GridDimensions.z)) {
+					uint gridCellIndex = y * uint(GridDimensions.x) + x;
+					uint binIndex = gridCellIndex * uint(GridDimensions.z) + z;
+					BilateralGrid[binIndex].weight = 0;
+					BilateralGrid[binIndex].value = 0;
+				}
+			}
+		}
+	}
+
+	Pass "BuildBilateralGrid"
+	{
+		[Flag] ThreadLimit : LimitedAt64, Native
+
+		[Option] GraphicsProfile : HiDef
+		[Option] Fallback : Fallback
+
+		[Option] KernelFunction : BuildGrid
+		[Option] Threads : "THREADS_X, THREADS_Y, 1"
+
+		Shader : Compute
+		{
+		#if flag(ThreadLimit, LimitedAt64)
+			#define THREADS_X 8
+			#define THREADS_Y 8
+		#else
+			#define THREADS_X 16
+			#define THREADS_Y 16
+		#endif
+
+			#include "Util/ColorUtil.dragonh"
+			#include "Util/PreExposureUtil.dragonh"
+			#include "PostFX/LocalExposureUtil.dragonh"
+
+			#define SceneResolution SceneResolutionAndRecipSceneResolution.xy
+			#define RecipSceneResolution SceneResolutionAndRecipSceneResolution.zw
+
+			void BuildGrid() {
+				uint x = GlobalInvocationID.x;
+				uint y = GlobalInvocationID.y;
+
+				if (x < uint(SceneResolution.x) && y < uint(SceneResolution.y)) {
+					vec3 color = texelFetch(SceneColor, ivec2(x, y), 0).rgb;
+					if (PreExposureEnabled > 0.0f) {
+						float exposure = texelFetch(PreviousFrameAverageLuminance, ivec2(0, 0), 0).r;
+						color = UnExposeLighting(color, exposure);
+					}
+
+					float logLuminance = clampedLogLuminance(luminance(color));
+					float normalizedLogLuminance = (logLuminance - BilateralGridMinLogLuminance) / (BilateralGridMaxLogLuminance - BilateralGridMinLogLuminance);
+					float histogramValue = GridDimensions.z * normalizedLogLuminance;
+
+					// Find the indices of the two nearest luminance bins in the histogram
+					vec2 pixelCenter = vec2(x, y) + vec2(0.5, 0.5);
+					uvec2 gridCell = uvec2(pixelCenter * RecipSceneResolution.xy * GridDimensions.xy);
+					uint histogramBin = uint(clamp(int(histogramValue), 0, int(GridDimensions.z) - 2));
+					uint index1 = indexFromCoords(uvec3(GridDimensions.xyz), uvec3(gridCell, histogramBin));
+					uint index2 = indexFromCoords(uvec3(GridDimensions.xyz), uvec3(gridCell, histogramBin + 1));
+
+					// Compute weights for linearly interpolating the contribution of this pixel across the nearest two histogram bins
+					float histogramOffset = clamp(histogramValue - float(histogramBin), 0.0, 1.0);
+					float weight1 = 1.0f - histogramOffset;
+					float weight2 = histogramOffset;
+
+					atomicAdd(BilateralGrid[index1].weight, uint(weight1 * kFixedPointScaleFactor));
+					atomicAdd(BilateralGrid[index1].value, uint(weight1 * normalizedLogLuminance * kFixedPointScaleFactor));
+					atomicAdd(BilateralGrid[index2].weight, uint(weight2 * kFixedPointScaleFactor));
+					atomicAdd(BilateralGrid[index2].value, uint(weight2 * normalizedLogLuminance * kFixedPointScaleFactor));
+				}
+			}
+		}
+	}
+
+	Pass "FilterBilateralGrid"
+	{
+		[Flag] ThreadLimit : LimitedAt128, LimitedAt256, Native
+
+		[Option] GraphicsProfile : HiDef
+		[Option] Fallback : Fallback
+
+		[Option] KernelFunction : BuildGrid
+		[Option] Threads : "THREADS_X, THREADS_Y, THREADS_Z"
+
+		Shader : Compute
+		{
+		#if flag(ThreadLimit, LimitedAt128)
+			#define THREADS_X 8
+			#define THREADS_Y 8
+			#define THREADS_Z 2
+		#elif flag(ThreadLimit, LimitedAt256)
+			#define THREADS_X 8
+			#define THREADS_Y 8
+			#define THREADS_Z 4
+		#else
+			#define THREADS_X 8
+			#define THREADS_Y 8
+			#define THREADS_Z 8
+		#endif
+
+			#define BilateralGridFilterRadius BilateralFilterParams.x
+
+			void BuildGrid() {
+				uint x = GlobalInvocationID.x;
+				uint y = GlobalInvocationID.y;
+				uint z = GlobalInvocationID.z;
+
+				if (x < uint(GridDimensions.x) && y < uint(GridDimensions.y) && z < uint(GridDimensions.z)) {
+					int radius = int(BilateralGridFilterRadius);
+
+					// Choose sigma = radius / 2. The unnormalized Gaussian kernel is
+					//     G(x, y) = exp(-(x^2 + y^2) / (2 * sigma^2)) = exp(-(x^2 + y^2) / (1/2 * radius^2))
+					float denom = 0.5 * float(radius) * float(radius);
+
+					float totalWeight = 0.0f;
+					float totalValue = 0.0f;
+					float totalFilterWeight = 0.0f;
+
+					uint xMin = uint(clamp(int(x) - radius, 0, int(GridDimensions.x) - 1));
+					uint xMax = uint(clamp(int(x) + radius, 0, int(GridDimensions.x) - 1));
+					uint yMin = uint(clamp(int(y) - radius, 0, int(GridDimensions.y) - 1));
+					uint yMax = uint(clamp(int(y) + radius, 0, int(GridDimensions.y) - 1));
+					for (uint ySample = yMin; ySample <= yMax; ySample++) {
+						for (uint xSample = xMin; xSample <= xMax; xSample++) {
+							uint index = indexFromCoords(uvec3(GridDimensions.xyz), uvec3(xSample, ySample, z));
+
+							float weight = float(BilateralGrid[index].weight) * kFixedPointScaleFactorRecip;
+							float value = float(BilateralGrid[index].value) * kFixedPointScaleFactorRecip;
+
+							vec2 offset = vec2(float(xSample) - float(x), float(ySample) - float(y));
+							float filterWeight = exp(-(offset.x * offset.x + offset.y * offset.y) / denom);
+
+							totalWeight += filterWeight * weight;
+							totalValue += filterWeight * value;
+							totalFilterWeight += filterWeight;
+						}
+					}
+
+					float weight = totalWeight / totalFilterWeight;
+					float value = totalValue / totalFilterWeight;
+					imageStore(FilteredBilateralGridOutput, ivec3(x, y, z), vec4(weight, value, 0.0f, 0.0f));
+				}
+			}
+		}
+	}
+
+	UsePass "Fallback" : "Fallback"
+}

@@ -1,0 +1,88 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+MaterialDefinition "VolumeScattering"
+{
+	Properties 
+	{
+		[Texture:2DArray:rgba16f] LightingBuffer
+		[WTexture:2DArray:rgba16f] ScatteringBuffer
+		[Vector] VolumeDimensions
+		[Vector] VolumeNearFar // (near plane depth, far plane depth, unused, unused)
+	}
+
+	Pass "Scattering"
+	{
+		[Option] KernelFunction : Scattering
+		[Option] Threads : "8,8,1"
+		[Option] GraphicsProfile : HiDef
+		[Option] Fallback : Fallback
+
+		Shader : Compute
+		{
+			#include "Core/Lighting/VolumeScatteringUtil.dragonh"
+
+			void Scattering() {
+				int volumeWidth = int(VolumeDimensions.x);
+				int volumeHeight = int(VolumeDimensions.y);
+				int volumeDepth = int(VolumeDimensions.z);
+
+				int x = int(GlobalInvocationID.x);
+				int y = int(GlobalInvocationID.y);
+
+				// We round the number of threads up to the nearest multiple of thread group size, so threads that are outside the volume bounds should early-out
+				if (x >= volumeWidth || y >= volumeHeight) {
+					return;
+				}
+
+				// Sample points are located at half-texel offsets (i.e. at voxel centers) in the scattering volume.
+				// Start the process of ray-marching at the center of the -1th depth slice and step forward one slice at a time.
+				float prevW = -0.5 / VolumeDimensions.z;
+				float prevWLinear = logToLinearDepth(prevW);
+				float prevDepth = (1.0 - prevWLinear) * VolumeNearFar.x + prevWLinear * VolumeNearFar.y;
+
+				// Accumulate source term (emission and in-scattering) in the RGB channels and extinction term (absorption and out-scattering) in the A channel
+				vec4 accum = vec4(0.0, 0.0, 0.0, 1.0);
+				for (int z = 0; z < volumeDepth; ++z) {
+					// Depth slices are spaced logarithmically, so we have to invert the logarithmic warping to find the distance from one sample point to the next.
+					float nextW = (float(z) + 0.5) / VolumeDimensions.z;
+					float nextWLinear = logToLinearDepth(nextW);
+					float nextDepth = (1.0 - nextWLinear) * VolumeNearFar.x + nextWLinear * VolumeNearFar.y;
+					float stepSize = nextDepth - prevDepth;
+					prevDepth = nextDepth;
+
+					// Fetch source term (RGB channels) and extinction term (A channel) from the scattering buffer
+					vec4 sourceExtinction = imageLoad(LightingBuffer, ivec3(x, y, z));
+
+					float transmittance = exp(-sourceExtinction.a * stepSize);
+
+					// Integrate the contribution of source and extinction terms over the interval from one depth slice to the next.
+					// The first expression results in a divide-by-zero as extinction goes to zero, but the integral is still well defined,
+					// so we use the second expression for near-zero extinction values
+					float contribution = abs(sourceExtinction.a) > 1e-6 ? ((1.0 - transmittance) / sourceExtinction.a) : stepSize;
+					accum.rgb += accum.a * contribution * sourceExtinction.rgb;
+
+					accum.a *= transmittance;
+
+					// Write back accumulated source and extinction values to the scattering buffer
+					imageStore(ScatteringBuffer, ivec3(x, y, z), accum);
+				}
+			}
+		}
+	}
+
+	Pass "Fallback"
+	{
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+
+		Shader: Custom{
+			void Vert(VertexInput vertInput, inout VertexOutput vertOutput) {
+			}
+
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				fragOutput.Color0 = vec4(0.0, 0.0, 0.0, 0.0);
+			}
+		}
+	}
+}

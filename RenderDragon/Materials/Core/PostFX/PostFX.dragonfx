@@ -1,0 +1,37 @@
+/********************************************************
+*  (c) Mojang.    All rights reserved.                  *
+*  (c) Microsoft. All rights reserved.                  *
+*********************************************************/
+
+MaterialDefinition "PostFX"
+{
+	Properties
+	{
+		[Sampler:2D] RasterColor
+		[Vector] ScreenSize // xy = size, zw = 1 / size
+		[Vector] ViewportScale : (1.0, 1.0, 0.0, 0.0)
+	}
+
+	Shared
+	{
+		Declaration
+		{
+			[VertexInput:vec4] position : POSITION
+			[VertexInput:vec2] texcoord0 : TEXCOORD0
+			[FragmentInput:vec4] texcoord0 : TEXCOORD0
+		}
+
+		Code
+		{
+			#include "PostFX.dragonh"
+			#include "Util/NormalConversionUtil.dragonh"
+
+			void Vert(VertexInput vertInput, inout VertexOutput vertOutput) {
+				vertOutput.position = vec4(vertInput.position.xy * 2.0 - 1.0, 0.0, 1.0);
+
+				vertOutput.texcoord0.xy = vertInput.texcoord0 * ViewportScale.xy;
+				vertOutput.texcoord0.zw = vertInput.texcoord0.xy;
+			}
+		}
+	}
+}

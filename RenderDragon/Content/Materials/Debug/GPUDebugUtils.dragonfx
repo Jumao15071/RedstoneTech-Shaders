@@ -1,0 +1,59 @@
+// Copyright (c) Microsoft Corporation.  All rights reserved.
+
+MaterialDefinition "GPUDebugUtils"
+{
+	Properties
+	{
+		// Setup fake buffers to prevent optimization
+		[RWBuffer:int] FakeRWBuffer
+	}
+
+	Pass "Fallback"
+	{
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+
+		Shader: Custom{
+			void Vert(VertexInput vertInput, inout VertexOutput vertOutput) {
+			}
+
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				fragOutput.Color0 = vec4(0.0, 0.0, 0.0, 0.0);
+			}
+		}
+	}
+
+	Pass "TDRPass"
+	{
+		[Option] GraphicsProfile : HiDef
+		[Option] Fallback : Fallback
+
+		[Option] KernelFunction : InitiateTDR
+		[Option] Threads : "256, 1, 1"
+
+		Shader : Compute
+		{
+			void InitiateTDR() {
+				while(FakeRWBuffer[GlobalInvocationID.x] == 0) {
+					FakeRWBuffer[GlobalInvocationID.x] = 0;
+				}
+			}
+		}
+	}
+
+	Pass "GpuValidationPass"
+	{
+		[Option] GraphicsProfile : HiDef
+		[Option] Fallback : Fallback
+
+		[Option] KernelFunction : InitiateGpuValidaitonError
+		[Option] Threads : "256, 1, 1"
+
+		Shader : Compute
+		{
+			void InitiateGpuValidaitonError() {
+				FakeRWBuffer[GlobalInvocationID.x] = 0;
+			}
+		}
+	}
+}

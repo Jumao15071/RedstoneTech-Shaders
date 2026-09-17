@@ -1,0 +1,29 @@
+MaterialDefinition "PostFX.Debug.Texture2DArray" : "PostFX.Debug"
+{
+	Properties
+	{
+		[Sampler:2DArray, Precision:High] RasterColor
+		[Float] TextureArrayIndex
+	}
+
+	Pass "DebugBlit"
+	{
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+
+		Shader : Custom
+		{
+			void Vert(VertexInput vertInput, inout VertexOutput vertOutput) {
+				vertOutput.position = vec4(vertInput.position.xy * 2.0 - 1.0, 0.0, 1.0);
+				vertOutput.texcoord0 = vec2(vertInput.texcoord0.x, vertInput.texcoord0.y);
+			}
+
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				// Read the texel
+				vec4 texel = texture2DArray(RasterColor, vec3(fragInput.texcoord0, TextureArrayIndex));
+				fragOutput.Color0 = vec4(debugBlit(texel, uint(DebugMode), ClipPlanes.x, ClipPlanes.y), 1);
+			}
+		}
+	}
+
+}

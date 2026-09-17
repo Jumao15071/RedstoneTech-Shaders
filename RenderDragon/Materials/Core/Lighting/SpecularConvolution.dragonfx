@@ -1,0 +1,254 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+MaterialDefinition "SpecularConvolution"
+{
+	Properties
+	{
+		[Sampler:Cube] CubeMap
+		[Float] ConvolutionType: 0
+		[Vector] ConvolutionParameters: (512.0, 0, 1, 1) // x = sample count, y = mip level, z = edge length, w = num mips
+		[Float] CurrentFace: 0.0
+	}
+
+	Shared
+	{
+		Code
+		{
+			#include "Core/Lighting/ConvolutionParams.dragonh"
+			#include "Core/PBR/BRDFParams.dragonh"
+
+			#define ConvolutionSampleCount ConvolutionParameters.x
+			#define ConvolutionRoughness (ConvolutionParameters.y / (ConvolutionParameters.w - 1.0))
+			#define ConvolutionMip int(ConvolutionParameters.y)
+			#define ConvolutionEdgeLength int(ConvolutionParameters.z)
+
+#if !defined(BGFX_SHADER_LANGUAGE_ESSL) || (BGFX_SHADER_LANGUAGE_ESSL && BGFX_SHADER_LANGUAGE_ESSL >= 300)
+			// http://holger.dammertz.org/stuff/notes_HammersleyOnHemisphere.html
+			// efficient VanDerCorpus calculation.
+			float RadicalInverse_VdC(highp uint bits) {
+				bits = (bits << 16u) | (bits >> 16u);
+				bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+				bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+				bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+				bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+				return float(bits) * 2.3283064365386963e-10;
+			}
+#else
+			float VanDerCorpus(uint n, uint base) {
+				float invBase = 1.0 / float(base);
+				float denom   = 1.0;
+				float result  = 0.0;
+
+				for(int i = 0; i < 32; ++i)
+				{
+					if(n > uint(0))
+					{
+						denom   = mod(float(n), 2.0);
+						result += denom * invBase;
+						invBase = invBase / 2.0;
+						n       = uint(float(n) / 2.0);
+					}
+				}
+
+				return result;
+			}
+#endif
+
+			// taken from https://blog.selfshadow.com/publications/s2013-shading-course/karis/s2013_pbs_epic_notes_v2.pdf
+			vec2 Hammersley(highp uint i, uint N)
+			{
+			#if !defined(BGFX_SHADER_LANGUAGE_ESSL) || (BGFX_SHADER_LANGUAGE_ESSL && BGFX_SHADER_LANGUAGE_ESSL >= 300)
+				float ri = RadicalInverse_VdC(i);
+			#else
+				float ri = VanDerCorpus(i, 2);
+			#endif
+				return vec2(float(i) / float(N), ri);
+			}
+
+			// Generate sample vector oriented around the expected microsurface's halfway vector
+			// based on the surface's roughness and the low-discrepancy sequence value Xi
+			vec3 ImportanceSampleGGX(vec2 Xi, vec3 N, float roughness) {
+				float a = roughness * roughness;
+				float phi = 2.0f * M_PI * Xi.x;
+				float cosTheta = sqrt((1.0f - Xi.y) / (1.0f + ((a * a) - 1.0f) * Xi.y));
+				float sinTheta = sqrt(1.0f - cosTheta * cosTheta);
+
+				vec3 H;
+				H.x = cos(phi) * sinTheta;
+				H.y = sin(phi) * sinTheta;
+				H.z = cosTheta;
+
+				vec3 tangentUp = abs(N.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+				vec3 tangentX  = normalize(cross(tangentUp, N));
+				vec3 tangentY  = cross(N, tangentX);
+
+				return tangentX * H.x + tangentY * H.y + N * H.z;
+			}
+		}
+	}
+
+	Pass "GenerateBrdf"
+	{
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+
+		[VertexInput:vec4] position 	: POSITION
+
+		[FragmentInput:vec2] texCoord	: TEXCOORD0
+
+		Shader : Custom
+		{
+			#define ConvolutionSampleCount ConvolutionParameters.x
+
+			void Vert(VertexInput vertInput, inout VertexOutput vertOutput) {
+				vertOutput.position = vec4(vertInput.position.xy * 2.0 - 1.0, 0.0, 1.0);
+				vertOutput.texCoord = vertInput.position.xy;
+			}
+
+			vec2 IntegrateBrdf(vec3 N, float NdotV, float roughness) {
+				vec3 V;
+				V.x = sqrt(1.0f - NdotV * NdotV);
+				V.y = 0.0f;
+				V.z = NdotV;
+
+				float A = 0.0f;
+				float B = 0.0f;
+
+				for (highp int i = 0; i < int(ConvolutionSampleCount); ++i) {
+					vec2 Xi = Hammersley(uint(i), uint(ConvolutionSampleCount));
+					vec3 H = ImportanceSampleGGX(Xi, N, roughness);
+					vec3 L = 2.0f * dot(V, H) * H - V;
+
+					float NdotL = saturate(L.z);
+					float NdotH = saturate(H.z);
+					float VdotH = saturate(dot(V, H));
+
+					if (NdotL > 0.0f) {
+						float G = G_Smith(NdotL, NdotV, roughness * roughness);
+						float G_Vis = (G * VdotH) / (NdotH * NdotV);
+						float Fc = pow5(1.0f - VdotH);
+
+						A += (1.0f - Fc) * G_Vis;
+						B += Fc * G_Vis;
+					}
+				}
+
+				A /= ConvolutionSampleCount;
+				B /= ConvolutionSampleCount;
+
+				return vec2(A, B);
+			}
+
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				vec3 N = vec3(0, 0, 1);
+				float NdotV = fragInput.texCoord.x;
+				float roughness = fragInput.texCoord.y;
+				vec2 brdf = IntegrateBrdf(N, NdotV, roughness);
+
+				fragOutput.Color0 = vec4(brdf.x, brdf.y, 0, 1);
+			}
+		}
+	}
+
+	Pass "Convolve"
+	{
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+
+		[Option] GraphicsProfile : HiDef
+		[Option] Fallback : Fallback
+
+		[VertexInput:vec4] position 	: POSITION
+		[VertexInput:vec2] texcoord0 : TEXCOORD0
+
+		[FragmentInput:vec2] texCoord	: TEXCOORD0
+
+		Shader : Custom
+		{
+			#include "Util/CubemapUtil.dragonh"
+		
+			vec3 SampleCubemap(vec3 v, float mipLevel) {
+				return textureCubeLod(CubeMap, transformCubemapDirectionForScreen(v), mipLevel).rgb;
+			}
+
+			vec3 ImportanceSample(vec3 R, float roughness, uint sampleCount, float edgeLength) {
+				vec3 V = R;
+				vec3 N = R;
+
+				float totalWeight = 0.0;
+				vec3 prefilteredColor = vec3(0.0, 0.0, 0.0);
+
+				for (highp int i = 0; i < int(sampleCount); ++i) {
+					vec2 Xi = Hammersley(uint(i), sampleCount);
+					vec3 H = ImportanceSampleGGX(Xi, N, roughness);
+					vec3 L = normalize((2.0f * dot(V, H) * H) - V);
+
+					float NdotL = saturate(dot(N, L));
+					if (NdotL > 0.0f) {
+						// Probability Distribution Function (epsilon to avoid divide by zero)
+						float pdf = D_GGX_TrowbridgeReitz(N, H, roughness * roughness) / (4.0f + 0.0001f);
+
+						// Solid angle associated to a sample (epsilon to avoid divide by zero)
+						float omegaS = 1.0f / (float(sampleCount) * pdf);
+
+						// Solid angle associated to a pixel of the cubemap
+						float omegaP = 4.0f * M_PI / (6.0f * edgeLength * edgeLength);
+
+						float mipLevel = max(0.5f * log2(omegaS / omegaP), 0.0f);
+
+						prefilteredColor += SampleCubemap(L, mipLevel).rgb * NdotL;
+
+						totalWeight += NdotL;
+					}
+				}
+
+				totalWeight = max(0.001f, totalWeight);
+				return prefilteredColor / totalWeight;
+			}
+
+			void Vert(VertexInput vertInput, inout VertexOutput vertOutput) {
+				vertOutput.position = vec4(vertInput.position.xy * 2.0 - 1.0, 0.0, 1.0);
+				vertOutput.texCoord = vertInput.texcoord0;
+			}
+
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				vec3 R = normalize(convertQuadToCube(fragInput.texCoord, int(CurrentFace)));
+
+				vec3 convolvedColor = vec3(0.0f, 0.0f, 0.0f);
+
+				if (int(ConvolutionType) == kConvolutionTypeImportanceSampling) {
+					if (ConvolutionMip == 0) {
+						convolvedColor = SampleCubemap(R, 0.0);
+					}
+					else {
+						convolvedColor = ImportanceSample(R, ConvolutionRoughness, uint(ConvolutionSampleCount), float(ConvolutionEdgeLength));
+					}
+				}
+				else {
+					convolvedColor = SampleCubemap(R, float(ConvolutionMip));
+				}
+
+				fragOutput.Color0 = vec4(convolvedColor, 1.0);
+			}
+		}
+	}
+
+	Pass "Fallback" 
+	{
+		[Option] VertexFunction : FallbackVert
+		[Option] FragmentFunction : FallbackFrag
+
+		Shader:Custom
+		{
+
+			void FallbackVert(VertexInput vertInput, inout VertexOutput vertOutput) {
+			}
+
+			void FallbackFrag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				fragOutput.Color0 = vec4(0.0, 0.0, 0.0, 0.0);
+			}
+		}
+	}
+
+}

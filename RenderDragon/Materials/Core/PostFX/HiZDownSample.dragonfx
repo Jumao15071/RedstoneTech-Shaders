@@ -1,0 +1,77 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+MaterialDefinition "HiZDownSample" : "PostFX" {
+	Properties {
+		[Vector] MipResolutionAndRecipResolution
+		[Vector] PreviousMipResolutionAndRecipResolution
+		[Sampler:2D] PreviousMip
+	}
+
+	Shared {
+		Code {
+			#include "Util/UVUtil.dragonh"
+
+			vec4 ProjDepthToViewDepth(vec4 z, float n, float f) {
+				return (2.0f * f * n) / (z * (f - n) - f - n);
+			}
+
+			vec4 ViewDepthToLinearDepth(vec4 z, float n, float f) {
+				return (-z - n) / (f - n);
+			}
+
+			vec4 ProjDepthToLinearDepth(vec4 z, float n, float f) {
+				vec4 viewDepth = ProjDepthToViewDepth(z, n, f);
+				return ViewDepthToLinearDepth(viewDepth, n, f);
+			}
+		}
+	}
+
+	Pass "MinMaxDownSample" {
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+
+		[Flag] Mode : Initialize, Mip
+
+		Shader : Custom {
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				ivec2 coord = ivec2(fragInput.texcoord0.xy * MipResolutionAndRecipResolution.xy);
+				ivec2 prevCoord = ivec2(fragInput.texcoord0.xy * PreviousMipResolutionAndRecipResolution.xy);
+				ivec2 prevSize = ivec2(PreviousMipResolutionAndRecipResolution.xy);
+				vec2 uv = snapUV(fragInput.texcoord0.xy, MipResolutionAndRecipResolution);
+				//uv.y = 1.0 - uv.y; // TODO: does GLSL need inversion?
+
+				vec4 minSamples = vec4_splat(0.0);
+				vec4 maxSamples = vec4_splat(0.0);
+				vec2 sampleTemp;
+
+				sampleTemp = texture2D(PreviousMip, uv + vec2(0.0, 0.0) * PreviousMipResolutionAndRecipResolution.zw).rg;
+				minSamples[0] = sampleTemp.r;
+				maxSamples[0] = sampleTemp.g;
+
+				sampleTemp = texture2D(PreviousMip, uv + vec2(1.0, 0.0) * PreviousMipResolutionAndRecipResolution.zw).rg;
+				minSamples[1] = sampleTemp.r;
+				maxSamples[1] = sampleTemp.g;
+
+				sampleTemp = texture2D(PreviousMip, uv + vec2(1.0, 1.0) * PreviousMipResolutionAndRecipResolution.zw).rg;
+				minSamples[2] = sampleTemp.r;
+				maxSamples[2] = sampleTemp.g;
+
+				sampleTemp = texture2D(PreviousMip, uv + vec2(0.0, 1.0) * PreviousMipResolutionAndRecipResolution.zw).rg;
+				minSamples[3] = sampleTemp.r;
+				maxSamples[3] = sampleTemp.g;
+
+#if flag(Mode, Initialize)
+				vec4 linearSamples = ProjDepthToLinearDepth(minSamples, 0.25, 1000.0);
+				float minTexel = min4(linearSamples);
+				float maxTexel = max4(linearSamples);
+#else
+				float minTexel = min4(minSamples);
+				float maxTexel = max4(maxSamples);
+#endif
+
+				fragOutput.Color0 = vec4(minTexel, maxTexel, 0.0, 0.0);
+			}
+		}
+	}
+}

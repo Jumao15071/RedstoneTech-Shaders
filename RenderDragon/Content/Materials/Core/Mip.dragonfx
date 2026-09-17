@@ -1,0 +1,200 @@
+/********************************************************
+*  (c) Mojang.    All rights reserved.                  *
+*  (c) Microsoft. All rights reserved.                  *
+*********************************************************/
+
+MaterialDefinition "Core/Screen/Mip"
+{
+
+	Properties
+	{
+		[WTexture:2D:rgba16f] OutputMip
+
+		[Sampler:2D] FramebufferDepth
+
+		[Texture:2D:rgba16f] InputMip
+
+
+		[Matrix:4x4] SceneInverseProjection
+
+		[Vector] ScreenSize : (0,0,0,0)
+
+		[Float] Levels : 0.0
+
+	}
+	
+	Shared {
+		Code {
+		
+			vec3 screen_to_view(ivec2 lookup, float depth, mat4 proj) {
+				vec2 uv = (vec2(lookup) + 0.5) / ScreenSize.xy;
+				uv.y = 1.0 - uv.y;
+
+				vec4 pos = mul(proj, vec4(uv * 2.0 - 1.0, depth, 1.0));
+				pos.xyz = pos.xyz / pos.w;
+				return pos.xyz;
+			}
+
+			vec3 screen_to_view(ivec2 lookup) {
+				float depth = texelFetch(FramebufferDepth, lookup, 0).r;
+				return screen_to_view(lookup, depth, SceneInverseProjection);
+			}
+		
+		
+		}
+	}
+	
+	Pass "Fallback" {
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+
+		Shader: Custom{
+			void Vert(VertexInput vertInput, inout VertexOutput vertOutput) {
+			}
+
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				fragOutput.Color0 = vec4(0.0, 0.0, 0.0, 0.0);
+			}
+		}
+	}
+	
+
+	Pass "MipDistance"
+	{
+		[Option] GraphicsProfile : HiDef
+		
+		[Option] Fallback : Fallback
+
+		[Option] KernelFunction : MipDistance
+		[Option] Threads : "8, 8, 1"
+
+		Shader : Compute
+		{
+
+			vec2 get_value(ivec2 position) {
+#if BGFX_SHADER_LANGUAGE_HLSL >= 6
+				int level = int(Levels);
+				if (level == 0) {
+					return screen_to_view(position).zz;
+				}
+				else {
+					return imageLoad(InputMip, position).rg;
+				}
+#else
+				return vec2(0.0f, 0.0f);
+#endif
+			}
+			
+			void MipDistance() {
+#if BGFX_SHADER_LANGUAGE_HLSL >= 6
+				ivec2 size = ivec2(ScreenSize.xy);
+				ivec2 prev_size = ivec2(ScreenSize.xy * 2);
+
+				vec2 launch_index = vec2(GlobalInvocationID.x, GlobalInvocationID.y);
+
+				ivec2 pixel = ivec2(launch_index);
+				ivec2 prev_pixel = pixel * 2;
+
+				bool odd_column = (prev_size.x & 1) != 0 && pixel.x == prev_size.x - 3;
+				bool odd_row = (prev_size.y & 1) != 0 && pixel.y == prev_size.y - 3;
+
+				int level = int(Levels);
+
+				float minD = 0.0;
+				float maxD = 0.0;
+
+				if (level == 0) {
+					float u = get_value(prev_pixel).r;
+					float d = get_value(prev_pixel + ivec2(0, 1)).r;
+					float l = get_value(prev_pixel + ivec2(0, 0)).r;
+					float r = get_value(prev_pixel + ivec2(1, 1)).r;
+
+					minD = min(u, min(d, min(l, r)));
+					maxD = max(u, max(d, max(l, r)));
+
+					if (odd_column) {
+						float x = get_value(prev_pixel + ivec2(2, 0)).r;
+						float y = get_value(prev_pixel + ivec2(2, 1)).r;
+
+						if (odd_row) {
+							float z = get_value(prev_pixel + ivec2(2, 2)).r;
+
+							minD = min(minD, z);
+							maxD = min(maxD, z);
+						}
+
+						minD = min(minD, min(x, y));
+						maxD = min(maxD, min(x, y));
+					}
+
+					if (odd_row) {
+						float x = get_value(prev_pixel + ivec2(0, 2)).r;
+						float y = get_value(prev_pixel + ivec2(1, 2)).r;
+
+						minD = min(minD, min(x, y));
+						maxD = min(maxD, min(x, y));
+					}
+					
+				} else {
+					float u0 = get_value(prev_pixel).r;
+					float d0 = get_value(prev_pixel + ivec2(0, 1)).r;
+					float l0 = get_value(prev_pixel + ivec2(1, 0)).r;
+					float r0 = get_value(prev_pixel + ivec2(1, 1)).r;
+					minD = min(u0, min(d0, min(l0, r0)));
+
+					if (odd_column) {
+						float x = get_value(prev_pixel + ivec2(2, 0)).r;
+						float y = get_value(prev_pixel + ivec2(2, 1)).r;
+
+						if (odd_row) {
+							float z = get_value(prev_pixel + ivec2(2, 2)).r;
+
+							minD = min(minD, z);
+						}
+
+						minD = min(minD, min(x, y));
+					}
+
+					if (odd_row) {
+						float x = get_value(prev_pixel + ivec2(0, 2)).r;
+						float y = get_value(prev_pixel + ivec2(1, 2)).r;
+
+						minD = min(minD, min(x, y));
+					}
+
+					float u1 = get_value(prev_pixel).g;
+					float d1 = get_value(prev_pixel + ivec2(0, 1)).g;
+					float l1 = get_value(prev_pixel + ivec2(1, 0)).g;
+					float r1 = get_value(prev_pixel + ivec2(1, 1)).g;
+					maxD = max(u1, max(d1, max(l1, r1)));
+
+					if (odd_column) {
+						float x = get_value(prev_pixel + ivec2(2, 0)).g;
+						float y = get_value(prev_pixel + ivec2(2, 1)).g;
+
+						if (odd_row) {
+							float z = get_value(prev_pixel + ivec2(2, 2)).g;
+
+							maxD = min(maxD, z);
+						}
+
+						maxD = min(maxD, min(x, y));
+					}
+
+					if (odd_row) {
+						float x = get_value(prev_pixel + ivec2(0, 2)).g;
+						float y = get_value(prev_pixel + ivec2(1, 2)).g;
+
+						maxD = min(maxD, min(x, y));
+					}
+				}
+				imageStore(OutputMip, pixel, vec4(minD, maxD, 0, 0));
+#endif
+			}	
+
+		}
+	}
+
+
+	
+}

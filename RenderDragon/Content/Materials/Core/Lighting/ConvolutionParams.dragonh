@@ -1,0 +1,6 @@
+// Copyright (c) Mojang AB.  All rights reserved.
+
+#pragma once
+
+CONST(int kConvolutionTypeMipChain) = 0;
+CONST(int kConvolutionTypeImportanceSampling) = 1;

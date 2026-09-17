@@ -1,0 +1,48 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+#pragma once
+
+#define POSITIVE_X_FACE_ID 0
+#define NEGATIVE_X_FACE_ID 1
+#define POSITIVE_Y_FACE_ID 2
+#define NEGATIVE_Y_FACE_ID 3
+#define POSITIVE_Z_FACE_ID 4
+#define NEGATIVE_Z_FACE_ID 5
+
+// R needs to be in DirectX space
+vec3 transformCubemapDirectionForScreen(vec3 R) {
+#if BGFX_SHADER_LANGUAGE_GLSL
+	if (abs(R.y) > abs(R.x) && abs(R.y) > abs(R.z)) {
+		R.z *= -1.0;
+	}
+	else {
+		R.y *= -1.0;
+	}
+#endif
+	return R;
+}
+
+vec3 convertQuadToCube(vec2 inCoords, int face) {
+	inCoords = inCoords * 2.0 - 1.0;
+	vec3 uv = vec3_splat(0.0);
+	if (face == POSITIVE_X_FACE_ID) {
+		uv = vec3(1.0, -inCoords.y, -inCoords.x);
+	}
+	else if(face == NEGATIVE_X_FACE_ID) {
+		uv = vec3(-1.0, -inCoords.y, inCoords.x);
+	}
+	else if(face == POSITIVE_Y_FACE_ID) {
+		uv = vec3(inCoords.x, 1.0, inCoords.y);
+	}
+	else if(face == NEGATIVE_Y_FACE_ID) {
+		uv = vec3(inCoords.x, -1.0, -inCoords.y); 
+	}
+	else if(face == POSITIVE_Z_FACE_ID) {
+		uv = vec3(inCoords.x, -inCoords.y, 1.0);
+	}
+	else if(face == NEGATIVE_Z_FACE_ID) {
+		uv = vec3(-inCoords.x, -inCoords.y, -1.0);
+	}
+	return uv;
+}

@@ -1,0 +1,217 @@
+MaterialDefinition "PostFX.Debug"
+{
+	Properties
+	{
+		[Float] DebugMode : 0
+		[Vector] ClipPlanes : (0.025, 2500.0, 0.0, 0.0)
+	}
+
+	Shared
+	{
+		Declaration
+		{
+			[VertexInput:vec4] position : POSITION
+			[VertexInput:vec2] texcoord0 : TEXCOORD0
+			[FragmentInput:vec2] texcoord0 : TEXCOORD0
+		}
+
+		Code
+		{
+			// Keep in sync with the debug blit enum in BufferDebugBlitMode.h
+			#define DEBUG_MODE_COLOUR         int(0)
+			#define DEBUG_MODE_ALPHA          int(1)
+			#define DEBUG_MODE_NORMAL         int(2)
+			#define DEBUG_MODE_NORMAL_SIGNED  int(3)
+			#define DEBUG_MODE_MOTION_VECTORS int(4)
+			#define DEBUG_MODE_MOTION_VECTORS_BA int(5)
+			#define DEBUG_MODE_CHROMA         int(6)
+			#define DEBUG_MODE_POSITION       int(7)
+			#define DEBUG_MODE_RAW            int(8)
+			#define DEBUG_MODE_RED            int(9)
+			#define DEBUG_MODE_GREEN          int(10)
+			#define DEBUG_MODE_BLUE           int(11)
+			#define DEBUG_MODE_RED_SIGNED     int(12)
+			#define DEBUG_MODE_LUMINANCE      int(13)
+			#define DEBUG_MODE_AMBIENT        int(14)
+			#define DEBUG_MODE_DEPTH          int(15)
+			#define DEBUG_MODE_METALNESS      int(16)
+			#define DEBUG_MODE_SUBSURFACE     int(17)
+
+			#include "Util/NormalConversionUtil.dragonh"
+			#include "Util/GBufferUtil.dragonh"
+
+			vec3 debugBlit(vec4 texel, uint control, float near, float far) {
+				vec3 color;
+				bool doExplicitLinearToSrgbConversion = false;
+			
+				switch (control) {
+					case DEBUG_MODE_ALPHA: {
+						// Alpha channel mode
+						color = texel.aaa;
+						break;
+					}
+					case DEBUG_MODE_NORMAL: {
+						// Normal mode
+						vec3 normal = octToNdirUnorm(texel.xy);
+						color = normal * 0.5 + 0.5;
+						break;
+					}
+					case DEBUG_MODE_NORMAL_SIGNED: {
+						// Normal mode
+						vec3 normal = octToNdirSnorm(texel.xy);
+						color = normal * 0.5 + 0.5;
+						break;
+					}
+					case DEBUG_MODE_MOTION_VECTORS: {
+						// Motion Vector mode; now delivered as uv delta
+						vec2 mv = clamp((texel.xy / 1.0), -1.0, 1.0);
+						mv *= 10.f; // Amplify, for visualisation purposes
+						color = vec3(mv * 0.5 + 0.5, 0.0);
+						break;
+					}
+					case DEBUG_MODE_MOTION_VECTORS_BA: {
+						// Motion Vector mode; now delivered as uv delta
+						vec2 mv = clamp((texel.zw / 1.0), -1.0, 1.0);
+						mv *= 10.f; // Amplify, for visualisation purposes
+						color = vec3(mv * 0.5 + 0.5, 0.0);
+						break;
+					}
+					case DEBUG_MODE_CHROMA: {
+						// XY mode; output color from xy and set z as 0.0
+						color = vec3(texel.xy, 0.0);
+						break;
+					}
+					case DEBUG_MODE_POSITION: {
+						// Position mode
+						color = vec3(texel.xyz * 0.05 + 0.5);
+						break;
+					}
+					case DEBUG_MODE_RAW: {
+						// Regular color mode, but no sRGB conversion
+						color = texel.rgb;
+						break;
+					}
+					case DEBUG_MODE_RED: {
+						// Red channel mode
+						color = texel.rrr;
+						break;
+					}
+					case DEBUG_MODE_GREEN: {
+						// Green channel mode
+						color = texel.ggg;
+						break;
+					}
+					case DEBUG_MODE_BLUE: {
+						// Blue channel mode
+						color = texel.bbb;
+						break;
+					}
+					case DEBUG_MODE_RED_SIGNED: {
+						// Signed red channel mode
+						if (texel.r < 0) {
+							color = vec3(-texel.r, 0, 0);
+						}
+						else {
+							color = vec3(0, texel.r, 0);
+						}
+						break;
+					}
+					case DEBUG_MODE_LUMINANCE: {
+						const vec3 luminanceLUT[8] = {
+							vec3(0.f, 0.f, 0.f),
+							vec3(0.f, 0.f, 1.f),
+							vec3(0.f, 1.f, 1.f),
+							vec3(0.f, 1.f, 0.f),
+							vec3(1.f, 1.f, 0.f),
+							vec3(1.f, 0.f, 0.f),
+							vec3(1.f, 0.f, 1.f),
+							vec3(1.f, 1.f, 1.f)
+						};
+			
+						// Compute CIE luminance from linear sRGB/Rec.709 values
+						float luminance = dot(texel.rgb, vec3(0.2125f, 0.7154f, 0.0721f));
+						// Convert from luminance to EV100 value
+						float ev_100 = log2(luminance * (100.f / 12.5f));
+						// Map [-4, 10] EV100 range to [0, 7]
+						float mappedValue = clamp((ev_100 + 4.f) * .5f, 0.f, 8.f);
+						// Linearly interpolate between colors in the LUT
+						int index = clamp(int(mappedValue), 0, 6);
+						float offset = fract(mappedValue);
+						color = mix(luminanceLUT[index], luminanceLUT[index + 1], offset);
+						doExplicitLinearToSrgbConversion = true;
+						break;
+					}
+					case DEBUG_MODE_AMBIENT: {
+						// Display the green and blue channels containing vanilla ambient light
+						// red = block light, green = sky light
+						color = vec3(texel.gb, 0.0);
+						break;
+					}
+					case DEBUG_MODE_DEPTH: {
+						float z = texel.r;
+			
+						float linearizedZ = (near * far) / (far + z * (near - far));
+						float normalizedZ = (linearizedZ - near) / (far - near);
+						color = vec3(normalizedZ, 0.0f, 0.0f);
+			
+						doExplicitLinearToSrgbConversion = true;
+						break;
+					}
+					case DEBUG_MODE_METALNESS: {
+						float metalness;
+						float subsurface;
+						unpackMetalnessSubsurface(texel.a, metalness, subsurface);
+						color = vec3(metalness, metalness, metalness);
+						break;
+					}
+					case DEBUG_MODE_SUBSURFACE: {
+						float metalness;
+						float subsurface;
+						unpackMetalnessSubsurface(texel.a, metalness, subsurface);
+						color = vec3(subsurface, subsurface, subsurface);
+						break;
+					}
+					case DEBUG_MODE_COLOUR:
+					default: {
+						// Regular color mode
+						color = texel.rgb;
+						doExplicitLinearToSrgbConversion = true;
+						break;
+					}
+				}
+			
+				if (doExplicitLinearToSrgbConversion) {
+					// THIS IS IMPORTANT....
+					//
+					// The output color buffer is configured as R8G8B8A8_UNORM
+					// It is *not* configured as R8G8B8A8_UNORM_SRGB
+					// However - In this case, Windows *interprets* the buffer as sRGB
+					// so we need to do a manual conversion to sRGB.
+					// This is a crude approximation, but hopefully it's good enough.
+					color = power(color, vec3_splat(1.0 / 2.2));
+				}
+			
+				return color;
+			}
+		}
+	}
+
+	Pass "DebugBlit"
+	{
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+
+		Shader : Custom
+		{
+			void Vert(VertexInput vertInput, inout VertexOutput vertOutput) {
+				vertOutput.position = vec4(vertInput.position.xy * 2.0 - 1.0, 0.0, 1.0);
+				vertOutput.texcoord0 = vec2(vertInput.texcoord0.x, vertInput.texcoord0.y);
+			}
+
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				fragOutput.Color0 = vec4(0.0, 0.0, 0.0, 0.0);
+			}
+		}
+	}
+
+}

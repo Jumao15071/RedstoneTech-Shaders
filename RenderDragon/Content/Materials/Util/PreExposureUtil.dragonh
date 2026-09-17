@@ -1,0 +1,21 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+#pragma once
+
+#define PREEXPOSURE_EPSILON 1e-4	///< Epsilon value for making sure that functions don't divide by 0.
+
+// Exposes a color based on a provided average luminance.
+vec3 PreExposeLighting(vec3 color, float averageLuminance){
+	// 0.18f is used here to replicate the current value used for exposure in tonemapping.
+	// This value should be kept in sync with the value used in the tonemapping shader to ensure
+	// the final image is exposed the same with and without pre-exposure enabled.
+	return color * (0.18f / averageLuminance + PREEXPOSURE_EPSILON);
+}
+
+// Undoes the effects of `PreExposeLighting()` on a color
+// when the same value for averageLuminance is used.
+vec3 UnExposeLighting(vec3 color, float averageLuminance){
+	// 0.18 used to keep in line with how exposure is done in the tonemaping pass. (See `PreExposedLighting()`)
+	return color / (0.18f / averageLuminance + PREEXPOSURE_EPSILON);
+}

@@ -1,0 +1,348 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+#include "Util/DepthUtil.dragonh"
+#include "Util/TransformUtil.dragonh"
+#include "Util/NormalConversionUtil.dragonh"
+
+#define MISSED_RAY_HIT_VALUE -1.0
+
+// This returns UV in xy while the z is stored in NDC coordinates.
+vec3 viewSpaceToUV(vec3 viewPosition) {
+	vec4 clipSpacePosition = mul(Proj, vec4(viewPosition, 1.0));
+	vec3 ndcPosition = (clipSpacePosition.xyz / clipSpacePosition.w);
+	vec2 uv = (ndcPosition.xy + 1.0) * 0.5;
+
+	// transformUVForScreen logic assumes the UV treats (0, 0) as top left corner, so uv.y needs flipped
+	// Any platform specific logic is handled by the transformUVForScreen
+	uv.y = 1.0 - uv.y;
+	return vec3(transformUVForScreen(uv), ndcPosition.z);
+}
+
+bool isDepthInCameraBounds(float depth, float nearPlane, float farPlane) {
+	if(nearPlane < farPlane) {
+		return (nearPlane < depth && depth < farPlane);
+	}
+	else {
+		return (nearPlane > depth && depth > farPlane);
+	}
+}
+
+bool isRayHit(float value) {
+	return (value >= 0.0f);
+}
+
+float getFadingValue(
+	vec2 uv,
+	float roughness,
+	float rayPercentage,
+	vec3 rayDirWorldSpace,
+	float fadingPowerHorizontal,
+	float fadingPowerVertical,
+	float fadeDistance,
+	float roughnessCutoff,
+	float roughnessFadeStart,
+	float aspectRatio,
+	sampler2D normalVelocityBuffer)
+{
+	// Fading for rays sampling at the edge of the screen, this prevents an abrupt stop of the reflection once the uv reaches the actual borders.
+	vec2 fadeUV = (uv * 2.0) - 1.0;
+	fadeUV.x = power(abs(fadeUV.x), fadingPowerHorizontal * aspectRatio);
+	fadeUV.y = power(abs(fadeUV.y), fadingPowerVertical);
+	float fadeValueUV = (1.0 - fadeUV.x) * (1.0 - fadeUV.y);
+
+	float fadeValueRayPercentage = 1.0 - smoothstep(fadeDistance, 1.0, rayPercentage);
+
+	// Fade out roughness values to avoid harsh cutoff between materials receiving SSR and not
+	float roughnessFadeDuration = roughnessCutoff - roughnessFadeStart;
+	float roughnessLerpAlpha = (max(roughness, roughnessFadeStart) - roughnessFadeStart)  / roughnessFadeDuration;
+	float fadeValueRoughness = mix(1.0f, 0.0f, roughnessLerpAlpha);
+
+	// Fade out hits that are unlikely to be visible to the user
+	vec3 worldNorm = normalize(octToNdirSnorm(texture2D(normalVelocityBuffer, uv).xy));
+	float hitBackFace = saturate(1.0f - dot(worldNorm, normalize(rayDirWorldSpace)));
+
+	float fadeValue = min(fadeValueUV, fadeValueRayPercentage);
+	fadeValue = min(fadeValue, hitBackFace);
+	fadeValue = min(fadeValue, fadeValueRoughness);
+
+	return fadeValue;
+}
+
+int getStepsCount(vec3 rayStartScreenSpace, vec3 rayStepScreenSpace, int maxStepsCount) {
+	// Calculating the steps count is essentially a clipping process performed against the uv window of the screen and the z clipping space for distance.
+	vec3 stepsCountTopLeftNearCorner = rayStartScreenSpace / rayStepScreenSpace;
+	vec3 stepsCountBottomRightFarCorner = (vec3(1.0, 1.0, 1.0) - rayStartScreenSpace) / rayStepScreenSpace;
+
+	vec3 lowestStepCounts3 = vec3( rayStepScreenSpace.x < 0.0 ? abs(stepsCountTopLeftNearCorner.x) : stepsCountBottomRightFarCorner.x,
+								   rayStepScreenSpace.y < 0.0 ? abs(stepsCountTopLeftNearCorner.y) : stepsCountBottomRightFarCorner.y,
+								   rayStepScreenSpace.z < 0.0 ? abs(stepsCountTopLeftNearCorner.z) : stepsCountBottomRightFarCorner.z );
+
+	float stepsCountF = min(min(lowestStepCounts3.x, lowestStepCounts3.y), lowestStepCounts3.z);
+	int stepsCount = min(int(stepsCountF), maxStepsCount);
+
+	return stepsCount;
+}
+
+int PerformLinearSearch(
+	vec3 rayStartScreenSpace,
+	vec3 rayStepScreenSpace,
+	int stepsCount,
+	float thickness,
+	float nearPlane,
+	float farPlane,
+	vec4 screenSize,
+	sampler2D depthBuffer,
+	out vec3 foundPosition)
+{
+	foundPosition = vec3_splat(0.0);
+
+	int foundIteration = -1;
+	float prevRayZ = ProjDepthToLinearDepth(rayStartScreenSpace.z, nearPlane, farPlane);
+
+	// We use a while loop instead of a for loop to work around an bug with material compilation for Metal Shading Language
+	// There is a known issue with our SPIR-V to MSL pipeline that causes the compilation of more complex control flows to be incorrect
+	// This bug has been observed with the break and continue keywords as well as with multiple return points
+	int i = 1;
+	bool isRayPastTheTexel = false;
+
+	LOOP
+	while(i <= stepsCount && !isRayPastTheTexel) {
+		// Compute ray position and depth
+		vec3 positionScreenSpace = rayStartScreenSpace + (rayStepScreenSpace * float(i));
+
+		float rayLinearZ = ProjDepthToLinearDepth(positionScreenSpace.z, nearPlane, farPlane);
+
+		// Determine depth of scene at fragment from the depth buffer
+		float projectedDepth = texture2D(depthBuffer, positionScreenSpace.xy).x;
+#if BGFX_SHADER_LANGUAGE_GLSL
+		// Translate the depth value from the depth texture range [0,1] to the OpenGL NDC depth range [-1,1].
+		projectedDepth = projectedDepth * 2.0f - 1.0f;
+#endif
+		float sceneMinDepth = ProjDepthToLinearDepth(projectedDepth, nearPlane, farPlane);
+		float sceneMaxDepth = sceneMinDepth + thickness * sceneMinDepth;
+
+		isRayPastTheTexel = (sceneMinDepth <= rayLinearZ) && (prevRayZ <= sceneMaxDepth);
+
+		if (isRayPastTheTexel) {
+			foundIteration = i;
+			foundPosition = positionScreenSpace;
+		}
+
+		prevRayZ = rayLinearZ;
+		++i;
+	}
+
+	return foundIteration;
+}
+
+float PerformBinarySearch(
+	int foundIteration,
+	vec3 rayStartScreenSpace,
+	vec3 rayStepScreenSpace,
+	int binarySearchStepsCount,
+	float nearPlane,
+	float farPlane,
+	vec4 screenSize,
+	sampler2D depthBuffer,
+	inout vec3 foundPosition)
+{
+	float searchIterationBeforeHit = float(foundIteration - 1);
+	float searchIterationAfterHit = float(foundIteration);
+	float refinedFoundIteration = searchIterationAfterHit;
+
+	LOOP
+	for (int i=0; i<binarySearchStepsCount; i++) {
+		float searchIterationMidPoint = (searchIterationBeforeHit + searchIterationAfterHit) * 0.5f;
+		vec3 positionScreenSpaceMidPoint = rayStartScreenSpace + (rayStepScreenSpace * searchIterationMidPoint);
+
+		// Determine depth of scene at fragment from the depth buffer
+		float projectedDepth = texture2D(depthBuffer, positionScreenSpaceMidPoint.xy).x;
+#if BGFX_SHADER_LANGUAGE_GLSL
+		// Translate the depth value from the depth texture range [0,1] to the OpenGL NDC depth range [-1,1].
+		projectedDepth = projectedDepth * 2.0f - 1.0f;
+#endif
+		float sceneLinearDepth = ProjDepthToLinearDepth(projectedDepth, nearPlane, farPlane);
+		float rayLinearZ = ProjDepthToLinearDepth(positionScreenSpaceMidPoint.z, nearPlane, farPlane);
+
+		bool isRayPastTheTexel = (rayLinearZ > sceneLinearDepth);
+
+		if (isRayPastTheTexel) {
+			searchIterationAfterHit = searchIterationMidPoint;
+			refinedFoundIteration = searchIterationMidPoint;
+			foundPosition = positionScreenSpaceMidPoint;
+		}
+		else {
+			searchIterationBeforeHit = searchIterationMidPoint;
+		}
+	}
+
+	return refinedFoundIteration;
+}
+
+vec4 CalculateSSRHitPoint(
+	vec3 viewPosition,
+	vec3 viewNormal,
+	float roughness,
+	int maxStepsCount,
+	float rayStepLength,
+	float thickness,
+	float offset,
+	int binarySearchStepsCount,
+	float fadingPowerHorizontal,
+	float fadingPowerVertical,
+	float fadingDistance,
+	float roughnessCutoff,
+	float roughnessFadeStart,
+	float nearPlane,
+	float farPlane,
+	float aspectRatio,
+	vec2 unitPlaneExtents,
+	vec4 screenSize,
+	vec2 viewportScale,
+	sampler2D depthBuffer,
+	sampler2D normalVelocityBuffer)
+{
+	// Compute the ray starting point in view space and the ray's (unit length) ending point.
+	// For some reason, these conventions feel entirely opposite
+	vec3 viewDir = normalize(viewPosition);
+	vec3 reflectionDir = normalize(reflect(viewDir, viewNormal));
+	vec3 rayStartView = viewPosition + (viewNormal * offset);
+	vec3 rayEndView = rayStartView + reflectionDir;
+
+	// If the depth of our ray goes outside of the bounds of the near/far plane, early out to prevent artifacts when transforming to screen space
+	if(!isDepthInCameraBounds(rayEndView.z, nearPlane, farPlane) || !isDepthInCameraBounds(rayStartView.z, nearPlane, farPlane)) {
+		return vec4(0.0, 0.0, 0.0, MISSED_RAY_HIT_VALUE);
+	}
+
+	// Transform the reflection vector to screen space.
+	vec3 screenToViewport = vec3(viewportScale, 1.0);
+	vec3 rayStartScreenSpace = viewSpaceToUV(rayStartView) * screenToViewport;
+	vec3 rayEndScreenSpace = viewSpaceToUV(rayEndView) * screenToViewport;
+	vec3 rayScreenSpace = rayEndScreenSpace - rayStartScreenSpace;
+	vec2 rayInPixels = (rayScreenSpace.xy * screenSize.xy);
+
+	// We will iterate the 2d line one pixel at a time, using the largest of u & v to make sure no pixel is skipped.
+	float maxPixelsStepsCount = max(abs(rayInPixels.x), abs(rayInPixels.y));
+
+	// This is the ray, one pixel is size.
+	vec3 normalizedRayScreenSpace = (rayScreenSpace / maxPixelsStepsCount);
+
+	// This is the size of a ray step in screen space.
+	vec3 rayStepScreenSpace = rayStepLength * normalizedRayScreenSpace;
+
+	// Determine  how many steps to perform, this can be limited by the ray exiting the screen (uv coordinates) or the ray exiting the clip space (z coordinate only).
+	int stepsCount = getStepsCount(rayStartScreenSpace, rayStepScreenSpace, maxStepsCount);
+
+	// Perform a linear search on the linear depth buffer using the ray calculated above.
+	vec3 foundPosition = vec3_splat(0.0);
+	vec3 reflectionDirWorldSpace = mul(InvView, vec4(reflectionDir, 0.0f)).xyz;
+	int foundIteration = PerformLinearSearch(
+		rayStartScreenSpace,
+		rayStepScreenSpace,
+		stepsCount,
+		thickness,
+		nearPlane,
+		farPlane,
+		screenSize,
+		depthBuffer,
+		foundPosition);
+
+	// If no intersection found, early out.
+	if (foundIteration < 1) {
+		return vec4(0.0, 0.0, 0.0, MISSED_RAY_HIT_VALUE);
+	}
+
+	// Perform a refinement pass of the hit position using a binary search.
+	float refinedFoundIteration = PerformBinarySearch(
+		foundIteration,
+		rayStartScreenSpace,
+		rayStepScreenSpace,
+		binarySearchStepsCount,
+		nearPlane,
+		farPlane,
+		screenSize,
+		depthBuffer,
+		foundPosition);
+
+	// Fade the ray pixel based on the distance travelled and hit coordinates
+	float rayPercentage = refinedFoundIteration / float(stepsCount);
+	float fadingValue = getFadingValue(
+		foundPosition.xy,
+		roughness,
+		rayPercentage,
+		reflectionDirWorldSpace,
+		fadingPowerHorizontal,
+		fadingPowerVertical,
+		fadingDistance,
+		roughnessCutoff,
+		roughnessFadeStart,
+		aspectRatio,
+		normalVelocityBuffer);
+
+	// Return UV of hit plus ray length and fading value
+	return vec4(foundPosition.xy, foundPosition.z, fadingValue);
+}
+
+vec4 RayMarch(
+	vec2 uv,
+	vec2 projPos,
+	float roughness,
+	int maxStepsCount,
+	float rayStepLength,
+	float thickness,
+	float offset,
+	int binarySearchStepCount,
+	float fadingPowerHorizontal,
+	float fadingPowerVertical,
+	float fadingDistance,
+	float roughnessCutoff,
+	float roughnessFadeStart,
+	float nearPlane,
+	float farPlane,
+	float aspectRatio,
+	vec2 unitPlaneExtents,
+	vec4 screenSize,
+	vec2 viewportScale,
+	sampler2D depthBuffer,
+	sampler2D normalVelocityBuffer)
+{
+	vec4 color = vec4(0.0, 0.0, 0.0, MISSED_RAY_HIT_VALUE);
+
+	float d = texture2D(depthBuffer, uv).x;
+#if BGFX_SHADER_LANGUAGE_GLSL
+	// Translate the depth value from the depth texture range [0,1] to the OpenGL NDC depth range [-1,1].
+	d = d * 2.0f - 1.0f;
+#endif
+	vec3 viewPos = projToView(vec4(projPos, d, 1.0), InvProj).xyz;
+	vec3 worldNorm = normalize(octToNdirSnorm(texture2D(normalVelocityBuffer, uv).xy));
+
+	//We use inverse transpose of the view matrix to transform normals to avoid any issues caused by non-uniform scaling in the view matrix
+	vec3 viewNormal = normalize(mul(transpose(InvView), vec4(worldNorm, 0.0)).xyz);
+
+	// Perform the screen space reflections.
+	color = CalculateSSRHitPoint(
+		viewPos,
+		viewNormal,
+		roughness,
+		maxStepsCount,
+		rayStepLength,
+		thickness,
+		offset,
+		binarySearchStepCount,
+		fadingPowerHorizontal,
+		fadingPowerVertical,
+		fadingDistance,
+		roughnessCutoff,
+		roughnessFadeStart,
+		nearPlane,
+		farPlane,
+		aspectRatio,
+		unitPlaneExtents,
+		screenSize,
+		viewportScale,
+		depthBuffer,
+		normalVelocityBuffer);
+
+	return color;
+}

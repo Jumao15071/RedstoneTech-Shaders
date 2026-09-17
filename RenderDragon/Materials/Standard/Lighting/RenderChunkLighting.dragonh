@@ -1,0 +1,53 @@
+/********************************************************
+*  (c) Mojang.    All rights reserved.                  *
+*  (c) Microsoft. All rights reserved.                  *
+*********************************************************/
+
+#pragma once
+
+#include "Standard/Lighting/Common.dragonh"
+
+void computeLighting_RenderChunk_Vertex(VertexInput vInput, inout VertexOutput vOutput, vec3 worldPosition) {
+#if !defined(BGFX_SHADER_LANGUAGE_ESSL) || (BGFX_SHADER_LANGUAGE_ESSL && BGFX_SHADER_LANGUAGE_ESSL >= 300)
+	// See ShaderPackingHelpers.h/.cpp for packing on the cpu-side
+
+	// Unpack block/sky light and scale them to 0-1 space
+	uint unnormalized = uint(floor(vInput.lightmapUV.x * 255.0f));
+	uint unpackedBlockLight = unnormalized & 0x000F;
+	uint unpackedSkyLight = (unnormalized & 0x00F0) >> 4;
+
+	// Unpack block metadata (BLOCK_RENDER_METADATA_* flags in ShaderPackingHelpers.h)
+	uint unnormalizedMetadata = uint(floor(vInput.lightmapUV.y * 255.0f));
+	uint unpackedDitheringBit = (unnormalizedMetadata & (1 << 0));
+	uint unpackedMaskTintingBit = (unnormalizedMetadata & (1 << 1));
+
+	vOutput.ditheringAndMaskTinting = vec2(float(unpackedDitheringBit), float(unpackedMaskTintingBit));
+	vOutput.lightmapUV = vec2(saturate(unpackedBlockLight / 16.0f), saturate(unpackedSkyLight / 16.0f));
+#else
+	// We don't support below ESSL 300 anymore anyways, so this is ok
+	vOutput.ditheringAndMaskTinting = vec2(0.0f, 0.0f);
+	vOutput.lightmapUV = vInput.lightmapUV;
+#endif
+}
+
+void computeLighting_RenderChunk_AmbientLightValues(in StandardSurfaceInput surfaceInput, inout StandardSurfaceOutput surfaceOutput, vec2 blockSkyContribution) {
+	vec3 lightmapValue = texture2D(LightMapTexture, min(surfaceInput.lightmapUV * blockSkyContribution, vec2(1.0,1.0))).rgb;
+	surfaceOutput.AmbientLight = lightmapValue;
+}
+
+vec3 computeLighting_RenderChunk(FragmentInput fragInput, StandardSurfaceInput stdInput, StandardSurfaceOutput stdOutput, DirectionalLight primaryLight) {
+
+	return texture2D(LightMapTexture, stdInput.lightmapUV).rgb * stdOutput.Albedo;
+}
+
+void computeLighting_RenderChunk_SplitLightMapValues(vec2 lightmapUV, inout vec3 blockLight, inout vec3 skyLight) {
+	blockLight =  texture2D(LightMapTexture, min(vec2(lightmapUV.x, 1.5f * 1.0f / 16.0f), vec2(1.0,1.0))).rgb; // second row
+	skyLight = texture2D(LightMapTexture, min(vec2(lightmapUV.y, 0.5f * 1.0f / 16.0f), vec2(1.0,1.0))).rgb; // first row
+}
+
+vec3 computeLighting_RenderChunk_Split(FragmentInput fragInput, StandardSurfaceInput stdInput, StandardSurfaceOutput stdOutput, DirectionalLight primaryLight) {
+	vec3 blockLight;
+	vec3 skyLight;
+	computeLighting_RenderChunk_SplitLightMapValues(stdInput.lightmapUV.xy, blockLight, skyLight);
+	return clamp(blockLight + skyLight, 0.0f, 1.0f) * stdOutput.Albedo;
+}

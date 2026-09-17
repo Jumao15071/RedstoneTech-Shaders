@@ -1,0 +1,31 @@
+{
+    "version": 26,
+    "name": "RenderChunk",
+    "parent": "",
+    "buffers": [
+        "LightMapTexture",
+        "MatTexture",
+        "SeasonsTexture"
+    ],
+    "uniforms": [
+        "DitherParams",
+        "DitherParams2",
+        "GlobalRoughness",
+        "FogAndDistanceControl",
+        "FogColor",
+        "LightDiffuseColorAndIlluminance",
+        "LightWorldSpaceDirection",
+        "MeshContext",
+        "RenderChunkFogAlpha",
+        "SubPixelOffset",
+        "ViewPositionAndTime"
+    ],
+    "uniform_overrides": {},
+    "passes": [
+        "DepthOnlyOpaque",
+        "AlphaTest",
+        "DepthOnlyAlphaTest",
+        "Opaque",
+        "Transparent"
+    ]
+}

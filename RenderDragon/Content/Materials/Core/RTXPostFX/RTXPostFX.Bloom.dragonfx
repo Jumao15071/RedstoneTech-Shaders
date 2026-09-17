@@ -1,0 +1,95 @@
+/********************************************************
+*  (c) Mojang.    All rights reserved.                  *
+*  (c) Microsoft. All rights reserved.                  *
+*********************************************************/
+
+MaterialDefinition "RTXPostFX.Bloom" : "RTXPostFX"
+{
+	Properties
+	{
+		[Sampler:2D] gBloomOriginalInput
+		[Float] gBloomMultiplier : 0.075
+		[Vector] gViewportScale  : (1, 1, 1, 1)
+	}
+
+	Shared
+	{
+		Code
+		{
+			#if BGFX_SHADER_LANGUAGE_HLSL > 2
+			#include "RTXPostFX.Bloom.dragonh"
+			#else 
+
+			vec4 applyDownscaleUniformPass(FragmentInput fragInput) {
+				return texture2D(RasterColor, fragInput.texcoord0);
+			}
+
+			vec4 applyDownscaleGaussianPass(FragmentInput fragInput) {
+				return texture2D(RasterColor, fragInput.texcoord0);
+			}
+
+			vec4 applyUpscalePass(FragmentInput fragInput) {
+				return texture2D(RasterColor, fragInput.texcoord0);
+			}
+
+			vec4 applyBloomFinalPass(FragmentInput fragInput) {
+				return texture2D(RasterColor, fragInput.texcoord0);
+			}
+
+			#endif
+		}
+	}
+
+	Pass "BloomDownscaleUniformPass"
+	{
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+
+		Shader : Custom
+		{
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				fragOutput.Color0 = applyDownscaleUniformPass(fragInput);
+			}
+		}
+	}	
+
+	Pass "BloomDownscaleGaussianPass"
+	{
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+
+		Shader : Custom
+		{
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				fragOutput.Color0 = applyDownscaleGaussianPass(fragInput);
+			}
+		}
+	}	
+	
+
+	Pass "BloomUpscalePass"
+	{
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+
+		Shader : Custom
+		{
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				fragOutput.Color0 = applyUpscalePass(fragInput);
+			}
+		}
+	}
+
+	Pass "BloomFinalPass"
+	{
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+
+		Shader : Custom
+		{
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				fragOutput.Color0 = applyBloomFinalPass(fragInput);
+			}
+		}
+	}
+}

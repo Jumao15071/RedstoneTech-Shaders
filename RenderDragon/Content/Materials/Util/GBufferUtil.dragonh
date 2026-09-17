@@ -1,0 +1,61 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+#pragma once
+
+// Packs metalness and subsurface values into a single 8-bit channel of the G-buffer.
+//
+// The metalness range of [0.0, 1.0] is mapped to [128, 255], and the subsurface scattering range
+// of [0.0, 1.0] is mapped to [0, 127] (in reverse, with 0.0 mapped to 127 and 1.0 mapped to 0).
+// Metalness and subsurface scattering are treated as mutually exclusive, so only the greater of
+// the two values is encoded and the other is treated as 0.
+float packMetalnessSubsurface(float metalness, float subsurface) {
+	if (metalness > subsurface) {
+		return (128.0 / 255.0) + (127.0 / 255.0) * metalness;
+	}
+	else {
+		return (127.0 / 255.0) - (127.0 / 255.0) * subsurface;
+	}
+}
+
+// Unpacks metalness and subsurface values from a single 8-bit channel of the G-buffer.
+//
+// See packMetalnessSubsurface for more details.
+void unpackMetalnessSubsurface(float metalnessSubsurface, out float metalness, out float subsurface) {
+	metalness = saturate((255.0 / 127.0) * (metalnessSubsurface - (128.0 / 255.0)));
+	subsurface = saturate((255.0 / 127.0) * ((127.0 / 255.0) - metalnessSubsurface));
+}
+
+// Takes a single F32 float in range [0,1] and encodes it approximately into two F16 Unorm floats
+vec2 pack1F32to2U16(float n) {
+	n *= 65535.0;
+	float f = floor(n);
+	return vec2(f / 65535.0, (n - f));
+}
+
+// Takes two F16 Unorm floats and decodes them into a single F32 Unorm float
+// This is not guaranteed to preserve all 32-bits of precision, but should
+// preserve more info than a single F16 float could
+float unpack2U16to1F32(vec2 zz) {
+	return (zz.x * 65535.0 + zz.y) / 65535.0;
+}
+
+// Takes two 8-bit Unorm floats and packs them into a single F16 Unorm float
+float pack2U8to1U16(float a, float b) {
+	const float C2 = 0.00390625; // 1.0/256.0 in FP16
+	const float C3 = 0.99609375; // 255.0/256.0 in FP16
+	return (floor(a * 255.0) + b * C3) * C2;
+}
+
+// Takes an encoded F16 Unorm float and unpacks it into two F8 Unorm floats
+// This is guaranteed to accurately decode two 8-bit Unorm values so long as the hardware supports at-least FP16
+vec2 unpackU16to2U8(float n) {
+	const float C1 = 0.003922; // ~ 1.0/255.0 in FP16; FP32: 0.003921569; FP64: 0.00392156862745098
+
+	n *= 256.0;
+	float b = floor(n);
+
+	// Clamp to 1.0 because multiplying by C1 in FP16 and FP32 can nudge an encoded value of exactly 1.0
+	// slightly higher than 1.0. However, a value of 254/255 is unaffected and will be less than 1.0
+	return min(vec2(b, (n - b) * 256.0) * C1, 1.0);
+}

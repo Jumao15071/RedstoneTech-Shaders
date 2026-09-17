@@ -1,0 +1,58 @@
+// Copyright (c) Mojang AB.  All rights reserved.
+
+MaterialDefinition "CubemapTransfer"
+{
+	Properties
+	{
+		[Sampler:Cube] SrcTextureCube
+		[Float] CurrentFace: 0.0
+		[Float] CurrentMip: 0.0
+	}
+
+	Pass "CubemapToOffscreen"
+	{
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+
+		[Option] GraphicsProfile : HiDef
+		[Option] Fallback : Fallback
+
+		[VertexInput:vec4] position 	: POSITION
+		[VertexInput:vec2] texcoord0 : TEXCOORD0
+
+		[FragmentInput:vec2] texCoord	: TEXCOORD0
+
+		Shader : Custom
+		{
+			#include "Util/CubemapUtil.dragonh"
+
+			void Vert(VertexInput vertInput, inout VertexOutput vertOutput) {
+				vertOutput.position = vec4(vertInput.position.xy * 2.0 - 1.0, 0.0, 1.0);
+				vertOutput.texCoord = vertInput.texcoord0;
+			}
+
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				vec3 uv = convertQuadToCube(fragInput.texCoord, int(CurrentFace));
+
+				fragOutput.Color0 = textureCubeLod(SrcTextureCube, uv, CurrentMip - 1.0);
+			}
+		}
+	}
+
+	Pass "Fallback" 
+	{
+		[Option] VertexFunction : FallbackVert
+		[Option] FragmentFunction : FallbackFrag
+
+		Shader:Custom
+		{
+
+			void FallbackVert(VertexInput vertInput, inout VertexOutput vertOutput) {
+			}
+
+			void FallbackFrag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				fragOutput.Color0 = vec4(0.0, 0.0, 0.0, 0.0);
+			}
+		}
+	}
+}

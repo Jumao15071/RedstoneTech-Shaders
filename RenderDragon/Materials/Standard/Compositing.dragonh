@@ -1,0 +1,12 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+#pragma once
+
+struct CompositingOutput {
+	vec3 mLitColor;
+};
+
+vec4 standardComposite(StandardSurfaceOutput stdOutput, CompositingOutput compositingOutput) {
+	return vec4(compositingOutput.mLitColor, stdOutput.Alpha);
+}

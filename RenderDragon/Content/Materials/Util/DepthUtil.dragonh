@@ -1,0 +1,58 @@
+// Copyright (c) Mojang AB.  All rights reserved.
+
+#pragma once
+
+// Reversed operation of projection
+// ProjZ = -((f + n) * ViewZ / (f - n) + 2 * f * n / (f - n)) / (-ViewZ)
+// ViewZ = 2 * f * n / (ProjZ * (f - n) - (f + n))
+float ProjDepthToViewDepth(float z, float n, float f)
+{
+	return (2.0f * f * n) / (z * (f - n) - f - n);
+}
+
+float ViewDepthToLinearDepth(float z, float n, float f) 
+{
+	return (- z - n) / (f - n);
+}
+
+float ProjDepthToLinearDepth(float z, float n, float f) 
+{
+	float viewDepth = ProjDepthToViewDepth(z, n, f);
+	return ViewDepthToLinearDepth(viewDepth, n, f);
+}
+
+float MakeDepthNonLinear(float linearZ, float n, float f)
+{
+	const float kNonZeroEpsilon = 0.00000001f;
+	float fMinusN = f - n;
+	return ((f + n) / fMinusN) - ((2.f * n) / (linearZ * fMinusN));
+}
+
+float GetWorldDepth(float linearDepth, float nearPlane, float farPlane)
+{
+	return mix(nearPlane, farPlane, linearDepth);
+}
+
+// Get view-space position from uv. Uses ray from eye to point on frustum plane at
+// a distance of one. Uses tan(fov/2) supplied in UnitPlaneExtents to calculate ray.
+// More info here: https://www.khronos.org/opengl/wiki/Compute_eye_space_from_window_space
+vec4 uvToViewSpacePosWithDepth(vec2 uv, vec2 unitPlaneExtents, float d) {
+	vec3 ray = vec3((vec2(uv.x, 1.0 - uv.y) * 2.0 - 1.0) * unitPlaneExtents.xy, -1.0);
+	return vec4(ray * d, 1.0);
+}
+
+float ndcZToDepthTexZ(float z) {
+#if BGFX_SHADER_LANGUAGE_GLSL
+	// Translate the depth value from the OpenGL NDC depth range [-1,1] to unsigned depth texture range [0,1]
+	z = z * 0.5 + 0.5;
+#endif
+	return z;
+}
+
+float depthTexZToNdcZ(float z) {
+#if BGFX_SHADER_LANGUAGE_GLSL
+	// Translate the depth value from unsigned depth texture range [0,1] to OpenGL NDC depth range [-1,1]
+	z = z * 2.0 - 1.0;
+#endif
+	return z;
+}

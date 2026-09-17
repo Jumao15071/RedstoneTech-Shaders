@@ -1,0 +1,23 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+MaterialDefinition "Core/Color"
+{
+	Properties 
+	{
+		[Color] MatColor: #FFFFFF
+	}
+
+	Standard
+	{
+		[Option] SurfaceFunction : EntitySurfOpaque
+
+		Shader:Standard
+		{
+			void EntitySurfOpaque(in StandardSurfaceInput surfaceInput, inout StandardSurfaceOutput surfaceOutput) {
+				surfaceOutput.Albedo = MatColor.rgb;
+				surfaceOutput.Alpha = MatColor.a;
+			}
+		}
+	}
+}

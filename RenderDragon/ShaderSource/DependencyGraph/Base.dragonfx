@@ -1,0 +1,17 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+MaterialDefinition "BaseTestMaterial"
+{
+	Standard
+	{
+		[Option] SurfaceFunction : Surf
+		[Option] Lighting : Unlit
+
+		Shader:Standard
+		{
+			void Surf(in StandardSurfaceInput surfaceInput, inout StandardSurfaceOutput surfaceOutput) {
+			}
+		}
+	}
+}

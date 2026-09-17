@@ -1,0 +1,20 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+#define MaxStepsCount int(SSRRayMarchingParams.x)
+#define RayStepLength SSRRayMarchingParams.y
+#define Offset SSRRayMarchingParams.z
+#define BinarySearchStepsCount int(SSRRayMarchingParams.w)
+
+#define FadingPowerHorizontal SSRFadingParamsAndThickness.x
+#define FadingPowerVertical SSRFadingParamsAndThickness.y
+#define FadingDistance SSRFadingParamsAndThickness.z
+#define Thickness SSRFadingParamsAndThickness.w
+
+#define RoughnessCutoff SSRRoughnessCutoffParams.x
+#define RoughnessFadeStart SSRRoughnessCutoffParams.y
+
+#define TemporalAccumulationEnabled SSRTemporalAccumulationParams.x
+#define AllowedStandardDeviationDifference SSRTemporalAccumulationParams.y
+#define StatisticRadius SSRTemporalAccumulationParams.z
+#define CurrentColorContribution SSRTemporalAccumulationParams.w

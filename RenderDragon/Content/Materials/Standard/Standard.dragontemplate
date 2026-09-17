@@ -1,0 +1,207 @@
+/********************************************************
+*  (c) Mojang.    All rights reserved.                  *
+*  (c) Microsoft. All rights reserved.                  *
+*********************************************************/
+
+MaterialDefinition "Standard-Template"
+{	
+	Properties 
+	{
+		[Vector] LightWorldSpaceDirection : (0,-1,0,1)
+		[Vector] LightDiffuseColorAndIlluminance : (1,1,1,1)
+		[Vector] MaterialID : (0,0,0,0) // For use with custom surface shader intrinsics
+	}
+
+	Shared
+	{
+		Declaration
+		{
+			[Flag] Instancing : Off, On
+		
+			[VertexInput:vec3] position : POSITION
+
+			// For some reason in BGFX, it seems that for instance data, texcoords have to be in reverse
+			[InstanceInput:vec4] instanceData0 : TEXCOORD7
+			[InstanceInput:vec4] instanceData1 : TEXCOORD6
+			[InstanceInput:vec4] instanceData2 : TEXCOORD5
+
+			[VertexInput:vec4] color0 : COLOR0
+
+			[VertexInput:vec2] texcoord0 : TEXCOORD0
+
+			[FragmentInput:vec2] texcoord0 : TEXCOORD0
+			[FragmentInput:vec4] color0 : COLOR0
+
+			[FragmentInput:vec3] worldPos : TEXCOORD3
+
+			// Default lighting used
+			[Option] Lighting : NdotL
+
+			// Defaults for customizations
+			[Option] SurfaceVertexOverride : StandardTemplate_VertexOverrideIdentity
+			[Option] SurfaceVertexPreprocess : StandardTemplate_VertexPreprocessIdentity
+			[Option] SurfaceFinalColorOverride : StandardTemplate_FinalColorOverrideIdentity
+			[Option] LightingVertexFunction : StandardTemplate_LightingVertexFunctionIdentity
+
+			[Option] CustomSurfaceFunction : StandardTemplate_CustomSurfaceShaderEntryIdentity
+		}
+
+		Code
+		{
+			#include "Standard/Compositing.dragonh"
+
+			void StandardTemplate_VertSharedTransform(inout StandardVertexInput stdInput, inout VertexOutput vertOutput) {
+				VertexInput vertInput = stdInput.vertInput;
+#if flag(Instancing, On)
+				mat4 model;
+				model[0] = vec4(vertInput.instanceData0.x, vertInput.instanceData1.x, vertInput.instanceData2.x, 0);
+				model[1] = vec4(vertInput.instanceData0.y, vertInput.instanceData1.y, vertInput.instanceData2.y, 0);
+				model[2] = vec4(vertInput.instanceData0.z, vertInput.instanceData1.z, vertInput.instanceData2.z, 0);
+				model[3] = vec4(vertInput.instanceData0.w, vertInput.instanceData1.w, vertInput.instanceData2.w, 1);
+
+				vec3 wpos = instMul(model, vec4(vertInput.position, 1.0)).xyz;
+#else
+				vec3 wpos = mul(World, vec4(vertInput.position, 1.0)).xyz;
+#endif
+				vertOutput.position = mul(ViewProj, vec4(wpos, 1.0));
+				stdInput.worldPos = wpos;
+				vertOutput.worldPos = wpos;
+			}
+
+			void StandardTemplate_VertexPreprocessIdentity(VertexInput vertInput, inout VertexOutput vertOutput) {
+				/* nothing, it's used by default when nothing else is set */
+			}
+
+			void StandardTemplate_VertexOverrideIdentity(StandardVertexInput vertInput, inout VertexOutput vertOutput) {
+				/* nothing, it's used by default when nothing else is set */
+			}
+			
+			void StandardTemplate_FinalColorOverrideIdentity(FragmentInput fragInput, StandardSurfaceInput surfaceInput, StandardSurfaceOutput surfaceOutput, inout FragmentOutput fragOutput) {
+				/* nothing, it's used by default when nothing else is set */
+			}
+			
+			void StandardTemplate_LightingVertexFunctionIdentity(VertexInput vertInput, inout VertexOutput vertOutput, vec3 worldPosition) {
+				/* nothing, it's used by default when nothing else is set */
+			}
+
+			void StandardTemplate_CustomSurfaceShaderEntryIdentity(vec2 uv, vec3 worldPosition, inout StandardSurfaceOutput surfaceOutput) {
+				/* nothing, it's used by default when nothing else is set */
+			}
+
+			// Needs to be forward declared because the user preprocess function will be included after this shared code section
+			void StandardTemplate_InvokeVertexPreprocessFunction(inout VertexInput vertInput, inout VertexOutput vertOutput);
+			void StandardTemplate_InvokeVertexOverrideFunction(StandardVertexInput vertInput, inout VertexOutput vertOutput);
+			void StandardTemplate_InvokeLightingVertexFunction(VertexInput vertInput, inout VertexOutput vertOutput, vec3 worldPosition);
+
+			{{#customSurfaceShader}}
+			{{{sharedCode}}}
+			{{/customSurfaceShader}}
+		}
+	}
+
+	Pass "DepthOnly"
+	{
+		[Option] VertexFunction : StandardTemplate_DepthOnly_Vert
+		[Option] FragmentFunction : StandardTemplate_DepthOnly_Frag
+			 
+		Shader:Custom
+		{
+			void StandardTemplate_InvokeVertexPreprocessFunction(inout VertexInput vertInput, inout VertexOutput vertOutput) {
+				{{{userVertexPreprocessFunction}}}(vertInput, vertOutput);
+			}
+			
+			void StandardTemplate_InvokeVertexOverrideFunction(StandardVertexInput vertInput, inout VertexOutput vertOutput) {
+				{{{userVertexOverrideFunction}}}(vertInput, vertOutput);
+			}
+
+			void StandardTemplate_DepthOnly_Vert(VertexInput vertInput, inout VertexOutput vertOutput) {
+				StandardTemplate_InvokeVertexPreprocessFunction(vertInput, vertOutput);
+
+				StandardVertexInput stdInput;
+				stdInput.vertInput = vertInput;
+
+				StandardTemplate_VertSharedTransform(stdInput, vertOutput);
+				StandardTemplate_InvokeVertexOverrideFunction(stdInput, vertOutput);
+			}
+				
+			void StandardTemplate_DepthOnly_Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				// nothing, but still there in case a platform doesn't support vertex only
+				// in this case, we don't even call the standard shader
+			}
+		}
+	}
+
+	Pass "Opaque"
+	{			
+		[Option] VertexFunction : StandardTemplate_Opaque_Vert
+		[Option] FragmentFunction : StandardTemplate_Opaque_Frag
+			 
+		Shader:Custom
+		{	
+			#include "Standard/Lighting/Common.dragonh"
+
+			void StandardTemplate_VertShared(VertexInput vertInput, inout VertexOutput vertOutput) {
+				StandardTemplate_InvokeVertexPreprocessFunction(vertInput, vertOutput);
+
+				StandardVertexInput stdInput;
+				stdInput.vertInput = vertInput;
+				StandardTemplate_VertSharedTransform(stdInput, vertOutput);
+
+				vertOutput.texcoord0 = vertInput.texcoord0;
+				vertOutput.color0 = vertInput.color0;
+
+
+				StandardTemplate_InvokeVertexOverrideFunction(stdInput, vertOutput);
+
+				StandardTemplate_InvokeLightingVertexFunction(vertInput, vertOutput, stdInput.worldPos);
+			}
+			
+			void StandardTemplate_InvokeVertexPreprocessFunction(inout VertexInput vertInput, inout VertexOutput vertOutput) {
+				{{{userVertexPreprocessFunction}}}(vertInput, vertOutput);
+			}
+			
+			void StandardTemplate_InvokeVertexOverrideFunction(StandardVertexInput vertInput, inout VertexOutput vertOutput) {
+				{{{userVertexOverrideFunction}}}(vertInput, vertOutput);
+			}
+
+			void StandardTemplate_InvokeLightingVertexFunction(VertexInput vertInput, inout VertexOutput vertOutput, vec3 worldPosition) {
+				{{{lightingVertexFunction}}}(vertInput, vertOutput, worldPosition);
+			}
+
+			void StandardTemplate_Opaque_Vert(VertexInput vertInput, inout VertexOutput vertOutput) {
+				StandardTemplate_VertShared(vertInput, vertOutput);
+			}
+				
+			void StandardTemplate_Opaque_Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+
+				StandardSurfaceInput surfaceInput = StandardTemplate_DefaultInput(fragInput);
+				StandardSurfaceOutput surfaceOutput = StandardTemplate_DefaultOutput();
+
+				surfaceInput.UV = fragInput.texcoord0;
+				surfaceInput.Color = fragInput.color0.xyz;
+				surfaceInput.Alpha = fragInput.color0.a;
+
+				{{{userSurfaceFunction}}}(surfaceInput, surfaceOutput);
+
+				{{{customSurfaceShaderEntryPoint}}}(surfaceInput.UV, fragInput.worldPos, surfaceOutput);
+
+				{{#customSurfaceShader}}
+				{{{entryPoint}}}(surfaceInput.UV, fragInput.worldPos, surfaceOutput);
+				{{/customSurfaceShader}}
+
+				DirectionalLight primaryLight;
+
+				vec3 worldLightDirection = LightWorldSpaceDirection.xyz;
+				primaryLight.ViewSpaceDirection = mul(View, vec4(worldLightDirection, 0)).xyz;
+				primaryLight.Intensity = LightDiffuseColorAndIlluminance.rgb * LightDiffuseColorAndIlluminance.w;
+				
+				CompositingOutput compositingOutput;
+				compositingOutput.mLitColor = {{{lightingFunction}}}(fragInput, surfaceInput, surfaceOutput, primaryLight);
+
+				fragOutput.Color0 = standardComposite(surfaceOutput, compositingOutput);
+
+				{{{userFinalColorOverrideFunction}}}(fragInput, surfaceInput, surfaceOutput, fragOutput);
+			}
+		}
+	}
+}

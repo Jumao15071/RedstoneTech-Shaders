@@ -1,0 +1,16 @@
+/********************************************************
+*   (c) Mojang. All rights reserved                     *
+*   (c) Microsoft. All rights reserved.                 *
+*********************************************************/
+
+#pragma once
+
+float computeWeight(float depthCenter, float depthP, float phiDepth, vec3 normalCenter, vec3 normalP, float phiNormal, float luminanceIllumCenter, float luminanceIllumP, float phiIllum) {
+	float weightNormal = power(saturate(dot(normalCenter, normalP)), phiNormal);
+	float weightZ = (phiDepth == 0) ? 0.0 : abs(depthCenter - depthP) / phiDepth;
+	float weightLillum = abs(luminanceIllumCenter - luminanceIllumP) / phiIllum;
+
+	float weightIllum = exp(0.0 - max(weightLillum, 0.0) - max(weightZ, 0.0)) * weightNormal;
+
+	return weightIllum;
+}

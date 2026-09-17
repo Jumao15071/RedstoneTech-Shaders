@@ -1,0 +1,21 @@
+/********************************************************
+*  (c) Mojang.    All rights reserved.                  *
+*  (c) Microsoft. All rights reserved.                  *
+*********************************************************/
+
+#pragma once
+
+#include "Standard/Lighting/Common.dragonh"
+ 
+void computeLighting_NdotL_Vertex(VertexInput vInput, inout VertexOutput vOutput, vec3 worldPosition) {
+	vec3 objectNormal = vInput.normal.xyz;
+	vec3 viewSpaceNormal = mul(WorldView, vec4(objectNormal.xyz, 0.0)).xyz;
+
+	vOutput.viewSpaceNormal = viewSpaceNormal;
+}
+
+vec3 computeLighting_NdotL(FragmentInput fragInput, StandardSurfaceInput stdInput, StandardSurfaceOutput stdOutput, DirectionalLight primaryLight) {
+	float l = saturate(dot(fragInput.viewSpaceNormal, -primaryLight.ViewSpaceDirection));
+
+	return vec3(.2, .2, .2) + (vec3(.8, .8, .8) * l * stdOutput.Albedo);
+}

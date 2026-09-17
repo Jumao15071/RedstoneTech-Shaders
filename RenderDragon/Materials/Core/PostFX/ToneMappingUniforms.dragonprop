@@ -1,0 +1,17 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+[Sampler:2D] ColorTexture
+[Sampler:2D] PreExposureLuminance
+[Sampler:2D] AverageLuminance
+[Sampler:2D] RasterizedColor
+// A 1 * n texture that stores the EC curve
+// x should be luminance, y should be EC
+[Sampler:2D] CustomExposureCompensation
+[Vector] ExposureCompensation : (0.0, 0.0, 0.0, 0.0) // exposureCompensationType, manualExposureCompensation, autoExposureEnabled, unused
+[Vector] LuminanceMinMaxAndWhitePointAndMinWhitePoint : (0.0, 0.0, 0.0, 0.0) // min, max, fixed whitepoint, min whitepoint
+[Vector] TonemapParams0 : (0.0, 0.0, 0.0, 0.0) // tonemapper, tonemapping enabled, pre exposure enabled, unused
+[Float] RasterizedColorEnabled : 1.0 // RasterizedColor is blended on backbuffer if this uniform is greater than zero
+
+[Vector] GenericTonemapperContrastAndScaleAndOffsetAndCrosstalk
+[Vector] GenericTonemapperCrosstalkParams

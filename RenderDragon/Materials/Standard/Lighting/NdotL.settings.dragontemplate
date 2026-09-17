@@ -1,0 +1,30 @@
+/********************************************************
+*  (c) Mojang.    All rights reserved.                  *
+*  (c) Microsoft. All rights reserved.                  *
+*********************************************************/
+
+LightingDefinition
+{	
+	Properties 
+	{
+		// Extra properties can be added for the light
+		[Vector] Ambient
+	}
+
+	Shared
+	{
+		Declaration
+		{
+			[VertexInput:vec4] normal : NORMAL
+			[FragmentInput:vec3] viewSpaceNormal : NORMAL
+
+			[Option] LightingFunction : computeLighting_NdotL
+			[Option] LightingVertexFunction : computeLighting_NdotL_Vertex
+		}
+
+		Code
+		{
+			#include "NdotL.dragonh"
+		}
+	}
+}

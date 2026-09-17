@@ -1,0 +1,31 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+#pragma once
+
+// These aliases refer to packed uniforms in ToneMappingUniforms.dragonprop
+
+// ExposureCompensation
+#define ExposureCompensationType ExposureCompensation.x
+#define ManualExposureCompensation ExposureCompensation.y
+#define AutoExposureEnabled ExposureCompensation.z
+
+// LuminanceMinMaxAndWhitePointAndMinWhitePoint
+#define LuminanceMin LuminanceMinMaxAndWhitePointAndMinWhitePoint.x
+#define LuminanceMax LuminanceMinMaxAndWhitePointAndMinWhitePoint.y
+#define FixedWhitePoint LuminanceMinMaxAndWhitePointAndMinWhitePoint.z
+#define MinWhitePoint LuminanceMinMaxAndWhitePointAndMinWhitePoint.w
+
+// TonemapParams0
+#define TonemapperType TonemapParams0.x
+#define TonemappingEnabled TonemapParams0.y
+#define PreExposureEnabled TonemapParams0.z
+
+// GenericTonemapperContrastAndScaleAndOffsetAndCrosstalk
+#define GenericTonemapperContrast GenericTonemapperContrastAndScaleAndOffsetAndCrosstalk.x
+#define GenericTonemapperScale GenericTonemapperContrastAndScaleAndOffsetAndCrosstalk.y
+#define GenericTonemapperOffset GenericTonemapperContrastAndScaleAndOffsetAndCrosstalk.z
+#define GenericTonemapperCrosstalk GenericTonemapperContrastAndScaleAndOffsetAndCrosstalk.w
+
+// GenericTonemapperCrosstalkParams
+#define GenericTonemapperCrosstalkSaturation GenericTonemapperCrosstalkParams.x

@@ -1,0 +1,47 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+MaterialDefinition "PBR/BRDF"
+{
+	Properties
+	{
+		[Sampler:2D] ColorMetalnessSubsurface
+		[Sampler:2D] Normal
+		[Sampler:2D] EmissiveAmbientLinearRoughness
+		[Sampler:2D] SceneDepth
+		[Vector] ViewportScale
+	}
+
+	Shared
+	{
+		Declaration
+		{
+			[VertexInput:vec3] position : POSITION
+			[VertexInput:vec2] texcoord0 : TEXCOORD0
+
+			[FragmentInput:vec3] projPosition : COLOR1
+			[FragmentInput:vec4] texcoord0 : TEXCOORD0
+		}
+
+		Code
+		{
+			#include "Util/ColorUtil.dragonh"
+			#include "Util/TransformUtil.dragonh"
+			#include "Util/NormalConversionUtil.dragonh"
+			#include "BRDFParams.dragonh"
+
+			// All materials that inherit from this base material should call this function
+			// They should also implement their own DeferredFrag
+			void DeferredVert(VertexInput vInput, inout VertexOutput vOutput) {
+				vOutput.position = vec4(vInput.position, 1.0);
+				vOutput.position.xy = vOutput.position.xy * 2.0 - 1.0;
+
+				vOutput.projPosition = vInput.position.xyz;
+				vOutput.projPosition.xy = vOutput.projPosition.xy * 2.0 - 1.0;
+
+				vOutput.texcoord0.xy = vInput.texcoord0 * ViewportScale.xy;
+				vOutput.texcoord0.zw = vInput.texcoord0;
+			}
+		}
+	}
+}

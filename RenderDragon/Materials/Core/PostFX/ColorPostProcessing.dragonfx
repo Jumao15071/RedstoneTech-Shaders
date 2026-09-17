@@ -1,0 +1,108 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+MaterialDefinition "ColorPostProcessing" : "PostFX"
+{
+	Properties
+	{
+		$import "ToneMappingUniforms.dragonprop"
+		$import "ColorGradingUniforms.dragonprop"
+	}
+
+	Pass "ColorPostProcess"
+	{
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+
+		Shader : Custom
+		{
+			#if BGFX_SHADER_LANGUAGE_HLSL
+				#define BADGER_WINDOWS
+			#endif
+
+			#include "PostFX/ToneMappingUniformsAliases.dragonh"
+			#include "PostFX/ColorPostProcessingHelpers.dragonh"
+			#include "Util/ColorUtil.dragonh"
+			#include "PostFX/ColorGrading.dragonh"
+			#include "PostFX/ToneMapping.dragonh"
+			#include "Util/PreExposureUtil.dragonh"
+
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				vec3 sceneColor = texture2D(ColorTexture, fragInput.texcoord0.xy).rgb;
+
+				if(PreExposureEnabled > 0.0){
+					float unexposeValue = texture2D(PreExposureLuminance, vec2(0.5, 0.5)).r;
+					sceneColor.rgb = UnExposeLighting(sceneColor.rgb, unexposeValue);
+				}
+
+
+				vec3 finalColor = sceneColor;
+
+				float averageLuminance = kMiddleGray;
+				if(AutoExposureEnabled > 0.5){
+					averageLuminance = clamp(texture2D(AverageLuminance, vec2(0.5f, 0.5f)).r, LuminanceMin, LuminanceMax);
+				}
+
+				// Calculate auto-exposure
+				// Compute scene’s geometric mean of luminance
+				// Instead of changing key values, we use a constant 0.18f (18% middle gray) and change exposure compensation
+				float compensation = ManualExposureCompensation;
+				int exposureCurveType = int(ExposureCompensationType);
+				if (exposureCurveType > 0 && exposureCurveType < 2) {
+					// Use the compensation curve to calculate exposure compensation
+					compensation = 1.03f - 2.0f / ((1.0f / log(10.0f)) * log(averageLuminance + 1.0f) + 2.0f);
+				}
+				else if(exposureCurveType > 1) {
+					// Use the custom curve
+					vec2 uv = vec2(LuminanceMin == LuminanceMax ? 0.5f : (luminanceToEV100(averageLuminance) - luminanceToEV100(LuminanceMin)) / (luminanceToEV100(LuminanceMax) - luminanceToEV100(LuminanceMin)), 0.5f);
+					compensation = texture2D(CustomExposureCompensation, uv).r; // Custom compensation curve
+				}
+
+				sceneColor = ApplyColorGrading(
+					sceneColor,
+					averageLuminance
+				);
+
+				// Use fixed white point
+				float whitePoint = FixedWhitePoint;
+
+				// Define a min white point so that dark scenes still make sense
+				whitePoint = whitePoint < MinWhitePoint ? MinWhitePoint : whitePoint;
+
+				// Expose the scene
+				float exposure = CalcExposure(averageLuminance, compensation);
+				vec3 exposedSceneColor = sceneColor * exposure;
+
+				if (TonemappingEnabled >= 0.5f) {
+					finalColor.rgb = ApplyTonemap(
+						exposedSceneColor,
+						exposure * whitePoint,
+						int(TonemapperType)
+					);
+				}else{
+					// Tone mapping is disabled so just apply the gamma curve to the
+					// existing bloomed color buffer value.
+					finalColor.rgb = ApplyGammaCurve(sceneColor);
+				}
+
+				// Perform a final clamp on the color since we aren't targeting HDR displays
+				finalColor.rgb = clamp(finalColor.rgb, vec3(0.0, 0.0, 0.0), vec3(1.0, 1.0, 1.0));
+
+				// Blend force-rasterized things (e.g. text, map) into back buffer if enabled
+				if (RasterizedColorEnabled > 0.0f) {
+					vec4 rasterized = texture2D(RasterizedColor, fragInput.texcoord0.xy);
+					finalColor.rgb *= 1.0 - rasterized.a;
+
+					// At this point, it is assumed that 'rasterized' is in linear
+					// color space, similarly to sceneColor.
+					// It is necessary to gamma encode it before adding it to finalColor,
+					// which is already gamma encoded.
+					finalColor.rgb += ApplyGammaCurve(rasterized.rgb);
+				}
+	
+
+				fragOutput.Color0 = vec4(finalColor.rgb, 1.0);
+			}
+		}
+	}
+}
