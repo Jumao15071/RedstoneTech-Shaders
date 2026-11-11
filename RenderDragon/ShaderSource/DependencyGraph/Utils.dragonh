@@ -1,0 +1,8 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+#pragma once
+
+vec4 testFunction(vec4 albedo) {
+	return vec4(albedo.z, albedo.y, albedo.x, 1.0);
+}

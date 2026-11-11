@@ -1,0 +1,132 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+////////////////////////////////////////////////////////////////////////////////////
+//
+// This header makes use of custom DragonFX options to allow required functions to 
+// be forward declared and defined after being included.
+//
+// For example, for a pass to implement FSR_RCAS_Load, use something like:
+//   [Option:Custom] FSR_RCAS_Load : "fsrLoadImage"
+//
+//   AFH4 fsrLoadImage(ASUW2 pixel) {
+//     return AFH4(texelFetch(InputTex, ivec2(pixel), 0));
+//   }
+//
+////////////////////////////////////////////////////////////////////////////////////
+//
+// Required Options passes including this file must implement depending on flags:
+// 
+// AFH4 option(FSR_EASU_GatherRed)(AF2 uv);
+// AFH4 option(FSR_EASU_GatherGreen)(AF2 uv);
+// AFH4 option(FSR_EASU_GatherBlue)(AF2 uv);
+//
+// AFH3 option(FSR_EASU_Sample)(AF2 uv);
+//
+// AFH4 option(FSR_RCAS_Load)(ASUW2 pixel);
+// void option(FSR_RCAS_Input)(inout AFH1 r, inout AFH1 g, inout AFH1 b);
+//
+////////////////////////////////////////////////////////////////////////////////////
+
+#pragma once
+
+// Platforms and shader types that currently support FSR1
+#define FSR1_CAPABLE (BGFX_SHADER_TYPE_COMPUTE || BGFX_SHADER_TYPE_FRAGMENT) && (BGFX_SHADER_LANGUAGE_HLSL >= 65 || BGFX_SHADER_LANGUAGE_SPIRV)
+
+#if FSR1_CAPABLE
+
+// Include FFXUtil only if it's needed
+#include "FFXUtil.dragonh"
+
+////////////////////////////////////////////////////////////
+//	Setup FSR1 EASU options
+////////////////////////////////////////////////////////////
+
+#if flag(FSRFilterMode, EASU)
+	#define __INCLUDE_FSR1 1
+
+	#if A_HALF
+		#define FSR_EASU_H 1
+	#else
+		#define FSR_EASU_F 1
+	#endif
+
+	// TextureGather implementations
+	AFH4 option(FSR_EASU_GatherRed)(AF2 uv);
+	AFH4 option(FSR_EASU_GatherGreen)(AF2 uv);
+	AFH4 option(FSR_EASU_GatherBlue)(AF2 uv);
+
+	AFH4 FFX_Function(FsrEasuR)(AF2 uv) {
+		return AFH4(option(FSR_EASU_GatherRed)(uv));
+	}
+
+	AFH4 FFX_Function(FsrEasuG)(AF2 uv) {
+		return AFH4(option(FSR_EASU_GatherGreen)(uv));
+	}
+
+	AFH4 FFX_Function(FsrEasuB)(AF2 uv) {
+		return AFH4(option(FSR_EASU_GatherBlue)(uv));
+	}
+
+	#if A_FRAG
+		// Define Fragment draw variant for EASU
+		#define FsrEasuF FsrEasuFragF
+
+		#if A_HALF
+			// Use "optimized" EASU variant
+			#define __INCLUDE_OPTIMIZED_EASU_H 1
+			#define FsrEasuL FsrEasuFragH
+
+			// Texture sample operation
+			AFH3 option(FSR_EASU_Sample)(AF2 uv);
+
+			AFH3 FFX_Function(FsrEasuSample)(AF2 uv) {
+				return AFH3(option(FSR_EASU_Sample)(uv));
+			}
+		#endif // A_HALF
+	#endif // A_FRAG
+#endif // flag(FSRFilterMode, EASU)
+
+////////////////////////////////////////////////////////////
+//	Setup FSR1 RCAS options
+////////////////////////////////////////////////////////////
+
+#if flag(FSRFilterMode, RCAS)
+	#define __INCLUDE_FSR1 1
+
+	#if A_HALF
+		#define FSR_RCAS_H 1
+	#else
+		#define FSR_RCAS_F 1
+	#endif
+
+	// Load texel from texture
+	AFH4 option(FSR_RCAS_Load)(ASUW2 pixel);
+
+	// Definition can be empty
+	void option(FSR_RCAS_Input)(inout AFH1 r, inout AFH1 g, inout AFH1 b);
+
+	AFH4 FFX_Function(FsrRcasLoad)(ASUW2 pixel) {
+		return option(FSR_RCAS_Load)(pixel);
+	}
+
+	void FFX_Function(FsrRcasInput)(inout AFH1 r, inout AFH1 g, inout AFH1 b) {
+		option(FSR_RCAS_Input)(r, g, b);
+	}
+#endif // flag(FSRFilterMode, RCAS)
+
+////////////////////////////////////////////////////////////
+//	Finally include the necessary FSR1 headers
+////////////////////////////////////////////////////////////
+
+#if __INCLUDE_FSR1
+	// Include FSR implementation last after everything is setup and declared
+	#include "External/FidelityFX/FSR/ffx_fsr1.dragonh"
+
+	#if __INCLUDE_OPTIMIZED_EASU_H
+		// For Fragment draws in HALF precision, use an "optimized" EASU pass instead
+		#include "External/FidelityFX/FSR/ffx_fsr1_mobile.dragonh"
+	#endif // __INCLUDE_OPTIMIZED_EASU_H
+#endif // __INCLUDE_FSR1
+
+#endif // FSR1_CAPABLE

@@ -1,0 +1,29 @@
+/********************************************************
+*  (c) Mojang.    All rights reserved.                  *
+*  (c) Microsoft. All rights reserved.                  *
+*********************************************************/
+
+LightingDefinition
+{	
+	Properties 
+	{
+		[Vector] Redness : (1,0,0,0)
+	}
+
+	Shared
+	{
+		Declaration
+		{
+			[Option] LightingFunction : computeLighting_Unlit
+		}
+
+		Code
+		{
+			#include "Standard/Lighting/Common.dragonh"
+
+			vec3 computeLighting_Unlit(FragmentInput fragInput, StandardSurfaceInput stdInput, StandardSurfaceOutput stdOutput, DirectionalLight primaryLight) {
+				return stdOutput.Albedo * Redness.xyz;
+			}
+		}
+	}
+}

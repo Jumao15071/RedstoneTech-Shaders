@@ -1,0 +1,145 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+MaterialDefinition "LocalExposure"
+{
+	Properties
+	{
+		[Sampler:2D] SceneColor
+		[Sampler:3D] FilteredBilateralGrid
+		[Sampler:2D] DownsampledLogLuminance
+		[Vector] GaussianBlurParams // filter radius, sample spacing, unused, unused
+		[Vector] LocalExposureParams // contrast scale, detail strength, unused, unused
+		[Vector] RecipSceneResolution // 1 / scene width, 1 / scene height, unused, unused
+		[Vector] LuminanceRangeParams // min log luminance, max log luminance, min linear luminance, max linear luminance
+		[Vector] ViewportScale : (1.0, 1.0, 0.0, 0.0) // viewport scale x, viewport scale y, texture sample max U, texture sample max V
+
+		[Sampler:2D] AverageLuminance
+		[Sampler:2D] PreviousFrameAverageLuminance
+		[Float] PreExposureEnabled
+	}
+
+	Shared
+	{
+		Declaration
+		{
+			[VertexInput:vec4] position : POSITION
+			[VertexInput:vec2] texcoord0 : TEXCOORD0
+			[FragmentInput:vec2] texcoord0 : TEXCOORD0
+		}
+
+		Code
+		{
+			void Vert(VertexInput vertInput, inout VertexOutput vertOutput) {
+				vertOutput.position = vec4(vertInput.position.xy * 2.0 - 1.0, 0.0, 1.0);
+				vertOutput.texcoord0 = vertInput.texcoord0.xy * ViewportScale.xy;
+			}
+		}
+	}
+
+	Pass "GaussianDownsample"
+	{
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+
+		Shader : Custom
+		{
+			#include "Util/ColorUtil.dragonh"
+			#include "PostFX/LocalExposureUtil.dragonh"
+
+			#define GaussianBlurFilterRadius GaussianBlurParams.x
+			#define GaussianBlurSampleSpacing GaussianBlurParams.y
+
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				vec2 uv = fragInput.texcoord0;
+
+				int radius = int(GaussianBlurFilterRadius);
+				int spacing = int(GaussianBlurSampleSpacing);
+				int sampleCount = radius / spacing;
+
+				// Choose sigma = radius / 2. The unnormalized Gaussian kernel is
+				//     G(x, y) = exp(-(x^2 + y^2) / (2 * sigma^2)) = exp(-(x^2 + y^2) / (1/2 * radius^2))
+				float denom = 0.5 * radius * radius;
+
+				float total = 0.0f;
+				float totalWeight = 0.0f;
+				for (int i = -sampleCount; i <= sampleCount; i++) {
+					for (int j = -sampleCount; j <= sampleCount; j++) {
+						vec2 offset = spacing * vec2(float(i), float(j));
+						float weight = exp(-(offset.x * offset.x + offset.y * offset.y) / denom);
+
+						vec3 color = texture2D(SceneColor, min(uv + offset * RecipSceneResolution.xy, ViewportScale.zw)).rgb;
+						total += weight * clampedLogLuminance(luminance(color));
+
+						totalWeight += weight;
+					}
+				}
+
+				fragOutput.Color0 = vec4(total / totalWeight, 0.0f, 0.0f, 0.0f);
+			}
+		}
+	}
+
+	Pass "ApplyLocalExposure"
+	{
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+
+		Shader : Custom
+		{
+			#include "Util/ColorUtil.dragonh"
+			#include "Util/PreExposureUtil.dragonh"
+			#include "PostFX/LocalExposureUtil.dragonh"
+
+			#define LocalExposureContrastScale LocalExposureParams.x
+			#define LocalExposureDetailStrength LocalExposureParams.y
+			#define LocalExposureBilateralGaussianBlend LocalExposureParams.z
+
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				// Determine the change in log luminance due to pre-exposure
+				float preexposureLogLuminance = 0.0f;
+				if (PreExposureEnabled > 0.0) {
+					float exposure = texture2D(PreviousFrameAverageLuminance, vec2(0.5, 0.5)).r;
+					preexposureLogLuminance = clampedLogLuminance(PreExposeLighting(vec3(1.0f, 1.0f, 1.0f), exposure).r);
+				}
+
+				vec2 uv = fragInput.texcoord0;
+
+				// Values in SceneColor are pre-exposed, so undo pre-exposure to find the full-scale log luminance
+				vec3 inputColor = texture2D(SceneColor, uv).rgb;
+				float inputLogLuminance = clampedLogLuminance(luminance(inputColor)) - preexposureLogLuminance;
+
+				// The downsampled luminance buffer also contains pre-exposed luminance values, so undo pre-exposure for them as well
+				float downsampledLogLuminance = texture2D(DownsampledLogLuminance, uv).r - preexposureLogLuminance;
+
+				// Get value from bilateral grid
+				float normalizedLogLuminance = (inputLogLuminance - BilateralGridMinLogLuminance) / (BilateralGridMaxLogLuminance - BilateralGridMinLogLuminance);
+				vec3 uvw = vec3(uv, normalizedLogLuminance);
+				vec2 weightAndValue = texture3D(FilteredBilateralGrid, uvw).rg;
+				float weight = weightAndValue.x;
+				float value = weightAndValue.y;
+				float filteredNormalizedLogLuminance = value / weight;
+				float bilateralGridLogLuminance = BilateralGridMinLogLuminance + filteredNormalizedLogLuminance * (BilateralGridMaxLogLuminance - BilateralGridMinLogLuminance);
+
+				// Blend between bilateral grid and Gaussian blur
+				float baseLogLuminance = mix(bilateralGridLogLuminance, downsampledLogLuminance, LocalExposureBilateralGaussianBlend);
+
+				// If there is no information in the bilateral grid, fall back to the Gaussian blur
+				if (weight < 0.001f) {
+					baseLogLuminance = downsampledLogLuminance;
+				}
+
+				// Treat the (temporally filtered) average luminance as the midpoint around which we will be compressing scene luminance
+				float midpointLogLuminance = clampedLogLuminance(texture2D(AverageLuminance, vec2(0.5f, 0.5f)).r);
+
+				// Compute local contrast adjustment
+				// Source: https://advances.realtimerendering.com/s2021/jpatry_advances2021/index.html#/136/0/5
+				float outputLogLuminance = midpointLogLuminance + LocalExposureContrastScale * (baseLogLuminance - midpointLogLuminance) + LocalExposureDetailStrength * (inputLogLuminance - baseLogLuminance);
+				float localExposure = exp2(outputLogLuminance - inputLogLuminance);
+
+				vec3 outputColor = localExposure * inputColor;
+				fragOutput.Color0 = vec4(outputColor, 1.0);
+			}
+		}
+	}
+}

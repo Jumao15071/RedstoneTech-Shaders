@@ -1,0 +1,104 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+// Generic header for DragonFX to interface with FidelityFX shaders
+
+#pragma once
+
+////////////////////////////////////////////////////////////
+//	First setup platform configuration details for FFX
+////////////////////////////////////////////////////////////
+
+#define A_GPU 1
+
+// For GLSL don't let FFX require GLSL extensions, let BGFX handle them instead
+#define A_SKIP_EXT 1
+
+#if BGFX_SHADER_LANGUAGE_HLSL
+	// For HLSL, let FSR use HLSL logic directly with no BGFX abstraction
+	#define A_HLSL 1
+
+	#if flag(FFXPrecision, HALF)
+		#define A_HALF 1
+	#endif
+
+	#if BGFX_SHADER_LANGUAGE_HLSL >= 62
+		#define A_HLSL_6_2 1
+
+//		// Wave intrinsics are available
+//		#define A_WAVE 1
+	#endif
+#elif BGFX_SHADER_LANGUAGE_SPIRV
+	// SPIRV specific setup for Vulkan platforms
+
+	// Our Vulkan SPIRV shaders get compiled as HLSL, so let FSR use HLSL with Vulkan
+	#define A_HLSL 1
+
+//	// Wave intrinsics are also compatible with Vulkan but we lack a way to detect platform support
+//	#define A_WAVE 1
+
+	#if flag(FFXPrecision, HALF)
+		#define A_HALF 1
+
+		// Is this necessary for GLSL as well or only Vulkan HLSL?
+		#define A_NO_16_BIT_CAST 1
+	#endif
+#else // BGFX_SHADER_LANGUAGE_SPIRV
+	// Fallback to GLSL for other platforms and let BGFX fill in the platform details
+	#define A_GLSL 1
+#endif // BGFX_SHADER_LANGUAGE_HLSL
+
+// Include the shared/common header after defining platform configuration
+#include "External/FidelityFX/FSR/ffx_a.dragonh"
+
+////////////////////////////////////////////////////////////
+//	Now setup configuration-specific type mappings for FFX
+////////////////////////////////////////////////////////////
+
+// Defines for variable precision types to make interfacing with functions
+// that differ between FFX's HALF/FULL precision modes easier
+//
+// | Macro | Full | Half |
+// |-------|------|------|
+// | AFH#  | AF#  | AH#  |
+// | AUW#  | AU#  | AW#  |
+// | ASUW# | ASU# | ASW# |
+//
+// Additionally, FFX_Function will append the appropriate "F" or "H" suffix
+// to function names depending on precision mode
+
+#if A_HALF
+	#define AFH1 AH1
+	#define AFH2 AH2
+	#define AFH3 AH3
+	#define AFH4 AH4
+
+	#define AUW1 AW1
+	#define AUW2 AW2
+	#define AUW3 AW3
+	#define AUW4 AW4
+
+	#define ASUW1 ASW1
+	#define ASUW2 ASW2
+	#define ASUW3 ASW3
+	#define ASUW4 ASW4
+
+	#define FFX_Function(funcname) funcname##H
+#else
+	#define AFH1 AF1
+	#define AFH2 AF2
+	#define AFH3 AF3
+	#define AFH4 AF4
+
+	#define AUW1 AU1
+	#define AUW2 AU2
+	#define AUW3 AU3
+	#define AUW4 AU4
+
+	#define ASUW1 ASU1
+	#define ASUW2 ASU2
+	#define ASUW3 ASU3
+	#define ASUW4 ASU4
+
+	#define FFX_Function(funcname) funcname##F
+#endif // A_HALF

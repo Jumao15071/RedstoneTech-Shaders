@@ -1,0 +1,30 @@
+/********************************************************
+*  (c) Mojang.    All rights reserved.                  *
+*  (c) Microsoft. All rights reserved.                  *
+*********************************************************/
+
+MaterialDefinition "Debug/ScreenUV"
+{
+	Pass "Screen"
+	{
+		[VertexInput:vec3] position : POSITION
+		[VertexInput:vec2] texcoord0 : TEXCOORD0
+
+		[FragmentInput:vec4] color : COLOR0
+
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+
+		Shader : Custom
+		{
+			void Vert(VertexInput vertInput, inout VertexOutput vertOutput) {
+				vertOutput.position = vec4(vertInput.position.xy * 2.0 - 1.0, 0.0, 1.0);
+				vertOutput.color = vec4(vertInput.texcoord0.xy, 1.0, 1.0);
+			}
+
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				fragOutput.Color0 = fragInput.color;
+			}
+		}
+	}
+}

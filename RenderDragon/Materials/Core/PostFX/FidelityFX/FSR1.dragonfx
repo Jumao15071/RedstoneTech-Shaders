@@ -1,0 +1,214 @@
+MaterialDefinition "FSR1" {
+	Properties {
+		[Vector] FSRConst0
+		[Vector] FSRConst1
+		[Vector] FSRConst2
+		[Vector] FSRConst3
+
+		[Vector] InputAndOutputResolution // xy = input width/height, zw = output width/height
+
+		[Sampler:2D] InputTex
+		[WTexture:2D:rgba8] OutputTex
+	}
+
+	Shared {
+		Code {
+			// Lovely orange warning color
+			#define FSR1_UNSUPPORTED_COLOR vec4(0.957, 0.275, 0.067, 1.0)
+		}
+	}
+
+	Pass "FSR1Compute" {
+		[Flag] FSRFilterMode : EASU, RCAS, BILINEAR
+		[Flag] FFXPrecision : FULL, HALF
+
+		[Option] KernelFunction : DoFSR
+		[Option] Threads : "64, 1, 1"
+
+		[Option] GraphicsProfile : HiDef
+		[Option] Fallback : Fallback
+
+		[Option:Custom] FSR_EASU_GatherRed   : "fsrGatherRed"
+		[Option:Custom] FSR_EASU_GatherGreen : "fsrGatherGreen"
+		[Option:Custom] FSR_EASU_GatherBlue  : "fsrGatherBlue"
+		[Option:Custom] FSR_EASU_Sample      : "" // Unused in compute
+
+		[Option:Custom] FSR_RCAS_Load  : "fsrLoadImage"
+		[Option:Custom] FSR_RCAS_Input : "fsrRcasInput"
+
+		Shader: Compute {
+			#include "Core/PostFX/FidelityFX/FSR1.dragonh"
+
+#if FSR1_CAPABLE
+			AFH4 fsrGatherRed(AF2 uv) {
+				vec4 red = textureGather(InputTex, uv, 0);
+				return AFH4(red);
+			}
+
+			AFH4 fsrGatherGreen(AF2 uv) {
+				vec4 green = textureGather(InputTex, uv, 1);
+				return AFH4(green);
+			}
+
+			AFH4 fsrGatherBlue(AF2 uv) {
+				vec4 blue = textureGather(InputTex, uv, 2);
+				return AFH4(blue);
+			}
+
+			AFH4 fsrLoadImage(ASUW2 pixel) {
+				return AFH4(texelFetch(InputTex, ivec2(pixel), 0));
+			}
+
+			void fsrRcasInput(inout AFH1 r, inout AFH1 g, inout AFH1 b) {
+				// Intentionally empty, not required to be implemented
+			}
+
+			void Filter(AU2 pos) {
+				AFH3 c;
+
+				#if flag(FSRFilterMode, EASU)
+					FFX_Function(FsrEasu)(c, pos, FSRConst0, FSRConst1, FSRConst2, FSRConst3);
+				#elif flag(FSRFilterMode, RCAS)
+					FFX_Function(FsrRcas)(c.r, c.g, c.b, pos, FSRConst0);
+				#else
+					// Bilinear filter for debugging and perf-testing purposes
+					AF2 uv = (AF2(pos) * FSRConst0.xy + FSRConst0.zw) * FSRConst1.xy + AF2(0.5, -0.5) * FSRConst1.zw;
+					c = AFH3(texture2DLod(InputTex, uv, 0.0).xyz);
+				#endif
+
+				imageStore(OutputTex, ASU2(pos), AFH4(c, 1.0));
+			}
+
+			void DoFSR() {
+				// Do remapping of local xy in workgroup for a more PS-like swizzle pattern
+				AU2 pos = ARmp8x8(LocalInvocationID.x) + AU2(WorkGroupID.x << 4u, WorkGroupID.y << 4u);
+
+				Filter(pos);
+				pos.x += 8u;
+				Filter(pos);
+				pos.y += 8u;
+				Filter(pos);
+				pos.x -= 8u;
+				Filter(pos);
+			}
+#else
+			void DoFSR() {
+				// Make diagonal orange lines
+				uvec2 pos = LocalInvocationID.x + uvec2(WorkGroupID.x << 4u, WorkGroupID.y << 4u);
+				imageStore(OutputTex, ivec2(pos), FSR1_UNSUPPORTED_COLOR);
+			}
+#endif // FSR1_CAPABLE
+		}
+	}
+
+	Pass "FSR1Frag" {
+		[Flag] FSRFilterMode : EASU, RCAS, BILINEAR
+		[Flag] FFXPrecision : HALF, FULL
+
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+
+		[Option] GraphicsProfile : HiDef
+		[Option] Fallback : Fallback
+
+		[Option:Custom] FSR_EASU_GatherRed   : "fsrGatherRed"
+		[Option:Custom] FSR_EASU_GatherGreen : "fsrGatherGreen"
+		[Option:Custom] FSR_EASU_GatherBlue  : "fsrGatherBlue"
+		[Option:Custom] FSR_EASU_Sample      : "fsrSampleTex"
+
+		[Option:Custom] FSR_RCAS_Load  : "fsrLoadImage"
+		[Option:Custom] FSR_RCAS_Input : "fsrRcasInput"
+
+		[VertexInput:vec4] position : POSITION
+		[VertexInput:vec2] texcoord0 : TEXCOORD0
+
+		[FragmentInput:vec2] texcoord0 : TEXCOORD0
+
+		Shader: Custom {
+			#define A_FRAG 1
+
+			#include "Core/PostFX/FidelityFX/FSR1.dragonh"
+
+#if FSR1_CAPABLE
+			AFH4 fsrGatherRed(AF2 uv) {
+				vec4 red = textureGather(InputTex, uv, 0);
+				return AFH4(red);
+			}
+
+			AFH4 fsrGatherGreen(AF2 uv) {
+				vec4 green = textureGather(InputTex, uv, 1);
+				return AFH4(green);
+			}
+
+			AFH4 fsrGatherBlue(AF2 uv) {
+				vec4 blue = textureGather(InputTex, uv, 2);
+				return AFH4(blue);
+			}
+
+			AFH3 fsrSampleTex(AF2 uv) {
+				return AFH3(texture2DLod(InputTex, uv, 0.0).xyz);
+			}
+
+			AFH4 fsrLoadImage(ASUW2 pixel) {
+				return AFH4(texelFetch(InputTex, ivec2(pixel), 0));
+			}
+
+			void fsrRcasInput(inout AFH1 r, inout AFH1 g, inout AFH1 b) {
+				// Intentionally empty, not required to be implemented
+			}
+
+			AFH3 Filter(AF2 pos) {
+				AFH3 c;
+
+				#if flag(FSRFilterMode, EASU)
+					FFX_Function(FsrEasuFrag)(c, pos, FSRConst0, FSRConst1, FSRConst2, FSRConst3);
+				#elif flag(FSRFilterMode, RCAS)
+					FFX_Function(FsrRcas)(c.r, c.g, c.b, pos, FSRConst0);
+				#else
+					// Bilinear filter for debugging and perf-testing purposes
+					AF2 uv = (AF2(pos) * FSRConst0.xy + FSRConst0.zw) * FSRConst1.xy + AF2(0.5, -0.5) * FSRConst1.zw;
+					c = AFH3(texture2DLod(InputTex, uv, 0.0).xyz);
+				#endif
+
+				return c;
+			}
+
+			vec3 DoFSR(vec2 uv) {
+				AU2 pos = AU2(uv * InputAndOutputResolution.zw);
+				return vec3(Filter(pos));
+			}
+#else
+			vec3 DoFSR(vec2 uv) {
+				// Make diagonal orange lines
+				ivec2 pos = ivec2(uv * InputAndOutputResolution.zw);
+				float lines = step(mod(pos.x - pos.y, 16.0) / 15.0, 1.0 / 16.0);
+				return FSR1_UNSUPPORTED_COLOR.rgb * lines;
+			}
+#endif // FSR1_CAPABLE
+
+			void Vert(VertexInput vertInput, inout VertexOutput vertOutput) {
+				vertOutput.position = vec4(vertInput.position.xy * 2.0 - 1.0, 0.0, 1.0);
+				vertOutput.texcoord0 = vec2(vertInput.texcoord0.x, vertInput.texcoord0.y);
+			}
+
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				vec2 uv = fragInput.texcoord0;
+				fragOutput.Color0 = vec4(DoFSR(uv), 1.0);
+			}
+		}
+	}
+
+	Pass "Fallback" {
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+
+		Shader: Custom {
+			void Vert(VertexInput vertInput, inout VertexOutput vertOutput) {
+			}
+
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				fragOutput.Color0 = vec4(0.0, 0.0, 0.0, 0.0);
+			}
+		}
+	}
+}

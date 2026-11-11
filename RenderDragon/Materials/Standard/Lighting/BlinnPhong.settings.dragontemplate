@@ -1,0 +1,31 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+LightingDefinition
+{	
+	Properties 
+	{
+		[Vector] LightAmbientColorAndIntensity : (.1,.1,.1,1)
+	}
+
+	Shared
+	{
+		Declaration
+		{
+			[Option] LightingFunction : computeLighting_BlinnPhong
+			[Option] LightingVertexFunction : computeLighting_BlinnPhong_Vertex
+
+			[Option] MaxPCFFilterSize : "2"
+			
+			[VertexInput:vec4] normal : NORMAL
+			[FragmentInput:vec3] viewSpaceNormal : NORMAL
+
+			[FragmentInput:vec4] viewSpacePosition : COLOR1
+		}
+
+		Code
+		{
+			#include "BlinnPhong.dragonh"
+		}
+	}
+}

@@ -1,0 +1,69 @@
+// Copyright (c) Microsoft Corporation. All rights reserved.
+
+#pragma once
+
+vec3 getClusterIndexFromViewPosition(
+    vec3 viewPos,
+    vec2 nearFar,
+    vec3 clusterCount,
+    float tanHalfFovY, float aspectRatio,
+    vec2 clusterDepthBounds,
+    vec4 precalculatedLightingValues
+)
+{
+    float z = -viewPos.z;
+    float yExtent = z * tanHalfFovY;
+    float xExtent = yExtent * aspectRatio;
+    float xNorm = clamp((viewPos.x + xExtent) / (2.0 * xExtent), 0.0, 1.0);
+    float yNorm = clamp((viewPos.y + yExtent) / (2.0 * yExtent), 0.0, 1.0);
+
+    float inverseDepthBoundMax = precalculatedLightingValues.x;
+    float loggedSecondClusterDepthMax = precalculatedLightingValues.z;
+
+    float zIdx;
+    if (z < clusterDepthBounds.x) {
+        zIdx = 0.0;
+    } else if (z < clusterDepthBounds.y) {
+        zIdx = 1.0;
+    } else {
+        float zNorm = clamp((log2(z) - loggedSecondClusterDepthMax) * inverseDepthBoundMax, 0.0, 1.0);
+        zIdx = min(floor(zNorm * (clusterCount.z - 2.0)) + 2.0, clusterCount.z - 1.0);
+    }
+
+    float xIdx = min(floor(xNorm * clusterCount.x), clusterCount.x - 1.0);
+    float yIdx = min(floor(yNorm * clusterCount.y), clusterCount.y - 1.0);
+
+    return vec3(xIdx, yIdx, zIdx);
+}
+
+vec3 getViewPositionFromClusterIndex(
+    vec3 clusterIdx,
+    vec2 nearFar,
+    vec3 clusterCount,
+    float tanHalfFovY, float aspectRatio,
+    vec2 clusterDepthBounds,
+    vec4 precalculatedLightingValues
+)
+{
+    float xNorm = clusterIdx.x / clusterCount.x;
+    float yNorm = clusterIdx.y / clusterCount.y;
+    float loggedSecondClusterDepthMax = precalculatedLightingValues.z;
+    float loggedFarPlane = precalculatedLightingValues.y;
+
+    float z;
+    if (clusterIdx.z < 1.0) {
+        z = 0.5 * clusterDepthBounds.x;
+    } else if (clusterIdx.z < 2.0) {
+        z = 0.5 * (clusterDepthBounds.x + clusterDepthBounds.y);
+    } else {
+        float zNorm = (clusterIdx.z - 2.0) / (clusterCount.z - 2.0);
+        z = exp2(mix(loggedSecondClusterDepthMax, loggedFarPlane, zNorm));
+    }
+
+    float yExtent = z * tanHalfFovY;
+    float xExtent = yExtent * aspectRatio;
+    float x = mix(-xExtent, xExtent, xNorm);
+    float y = mix(-yExtent, yExtent, yNorm);
+
+    return vec3(x, y, -z);
+}

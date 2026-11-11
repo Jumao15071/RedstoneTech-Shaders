@@ -1,0 +1,305 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+MaterialDefinition "LuminanceHistogram"
+{
+	Types
+    {
+        Histogram
+		{
+			[uint] count
+		}
+	}
+
+	Properties
+	{
+		[Vector] ScreenSize
+		
+		// Input
+		[Sampler:2D] GameColor
+
+		// Match the size of NUM_OF_BINS
+		[RWStructuredBuffer:Histogram] CurFrameLuminanceHistogram
+		[Float]	MinLogLuminance
+		[Float]	LogLuminanceRange
+
+		[Vector] QuantileBounds // low percent, high percent, unused, unused
+
+		// Two factors for adjusting adapted luminance
+		[Vector] Adaptation // Adaptation enabled, delta time
+		[Vector] AdaptiveParameters // adaptive time coefficient, speed up, speed down, unused
+		
+		// Output a 1 * 1 texture
+		[RWTexture:2D:r32f] AdaptedFrameAverageLuminance
+		// A 1 * 1 texture
+		[Sampler:2D] PreviousFrameAverageLuminance
+
+		[Float] CenterWeight
+
+		[Float] PreExposureEnabled
+	}
+	
+	Shared {
+		Code
+		{
+			// NUM_OF_BINS must be divisible by workgroup size (THREADS_X * THREADS_Y)
+			// i.e. NUM_OF_BINS % (THREADS_X * THREADS_Y) == 0
+			// Assumptions in BuildHistogram only hold true when this is true.
+#if flag(ThreadLimit, LimitedAt128)
+			#define THREADS_X 16
+			#define THREADS_Y 8
+#else
+			#define THREADS_X 16
+			#define THREADS_Y 16
+#endif
+
+			#define NUM_OF_BINS 256
+			#define EPSILON 0.00095f
+
+			#define LowQuantile QuantileBounds.x
+			#define HighQuantile QuantileBounds.y
+
+			#define AdaptationEnabled Adaptation.x
+			#define DeltaTime Adaptation.y
+
+			// The luminance histogram is built using atomic operations, which means it can't use floating point values.
+			// In order to be able to store fractional weights, we use 24.8 fixed point.
+			CONST(float kHistogramWeightScaleFactor) = float(1 << 8);
+			
+#if BGFX_SHADER_TYPE_COMPUTE
+			float getCurFrameHistogramCount(uint i) {
+				return float(CurFrameLuminanceHistogram[i].count);
+			}
+#else
+			float getCurFrameHistogramCount(uint i);
+#endif
+			float ComputeAverageLuminance(float prevLuminance) {
+				// First, compute the total weight in the luminance histogram, so that we can apply the quantile bounds
+				// relative to the overall total
+				float totalWeight = 0.0;
+
+				// Start at i = 1 so that we don't count pixels with luminance < EPSILON
+				for (uint i = 1u; i < uint(NUM_OF_BINS); ++i) {
+					float weight = getCurFrameHistogramCount(i) / kHistogramWeightScaleFactor;
+					totalWeight += weight;
+				}
+
+				float minWeight = totalWeight * LowQuantile;
+				float maxWeight = totalWeight * HighQuantile;
+
+				float totalLogLuminance = 0.0;
+
+				float weightSoFar = 0.0f;
+				float totalClampedWeight = 0.0f;
+
+				// Start at i = 1 so that we don't count pixels with luminance < EPSILON
+				for (uint i = 1u; i < uint(NUM_OF_BINS); ++i) {
+					float weight = getCurFrameHistogramCount(i) / kHistogramWeightScaleFactor;
+
+					// The histogram as a whole spans the weight range of [0, totalWeight]. The current bin spans the
+					// weight range of [weightSoFar, weightSoFar + weight]. We want to chop off any part of the current
+					// bin's weight range which extends below minWeight or above maxWeight.
+					float lower = max(weightSoFar, minWeight);
+					float upper = max(min(weightSoFar + weight, maxWeight), lower);
+
+					float clampedWeight = upper - lower;
+
+					totalLogLuminance += clampedWeight * float(i);
+					totalClampedWeight += clampedWeight;
+
+					weightSoFar += weight;
+				}
+
+				float meanLogLuminanceNormalized = totalLogLuminance / max(totalClampedWeight, 1.0f) - 1.0f;
+				float meanLogLuminance = meanLogLuminanceNormalized * (LogLuminanceRange / 254.0f) + MinLogLuminance;
+
+				float adaptedLogLuminance = meanLogLuminance;
+				if (AdaptationEnabled > 0.5) {
+					// Avoid passing zero or negative values to log2
+					float prevLuminanceSafe = max(prevLuminance, EPSILON);
+					float prevLogLuminance = clamp(log2(prevLuminanceSafe), MinLogLuminance, MinLogLuminance + LogLuminanceRange);
+
+					bool isBrighter = (meanLogLuminance > prevLogLuminance);
+					float speedParam = isBrighter ? AdaptiveParameters.y : AdaptiveParameters.z;
+					float adjustment = (meanLogLuminance - prevLogLuminance) * (1.0f - exp(-DeltaTime * AdaptiveParameters.x * speedParam));
+					adaptedLogLuminance = prevLogLuminance + adjustment;
+				}
+				float adaptedLuminance = exp2(adaptedLogLuminance);
+
+				return adaptedLuminance;
+			}
+		}
+	}
+	
+	Pass "Fallback"
+	{
+		[Flag] ThreadLimit : LimitedAt128
+
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+
+		Shader: Custom{
+			float getCurFrameHistogramCount(uint i) {
+				return 0.0;
+			}
+			
+			void Vert(VertexInput vertInput, inout VertexOutput vertOutput) {
+			}
+
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				fragOutput.Color0 = vec4(0.0, 0.0, 0.0, 0.0);
+			}
+		}
+	}
+	
+	Pass "CleanUp"
+	{
+		[Flag] ThreadLimit : LimitedAt128, Native
+
+		[Option] GraphicsProfile : HiDef
+		[Option] Fallback : Fallback
+
+		[Option] KernelFunction : Clean
+		[Option] Threads : "THREADS_X, THREADS_Y, 1"
+
+		Shader : Compute
+		{	
+			void Clean() {
+				CurFrameLuminanceHistogram[GlobalInvocationID.y * THREADS_X + GlobalInvocationID.x].count = 0u;
+			}
+		}
+	}
+	
+	Pass "BuildHistogram"
+	{
+		[Flag] ThreadLimit : LimitedAt128, Native
+
+		[Option] GraphicsProfile : HiDef
+		[Option] Fallback : Fallback
+
+		[Option] KernelFunction : Build
+		[Option] Threads : "THREADS_X, THREADS_Y, 1"
+
+		Shader : Compute
+		{
+			#include "Util/PreExposureUtil.dragonh"
+
+			// Shared array is located in fast storage and can be safely synchronized across threads
+			SHARED uint curFrameLuminanceHistogramShared[NUM_OF_BINS];
+
+			uint luminanceToHistogramBin(float luminance) {
+				if(luminance < EPSILON) {
+					return 0u;
+				}
+				
+				// Log2 gives a better distribution, so we'll have more bins for medium brightness
+				// In this way, we can adjust the weight of each range much easier, e.g. less weight for extremely bright pixels
+				// Get a value in the [0.0, 1.0] range
+				float logLuminance = clamp((log2(luminance) - MinLogLuminance) * 1.0f / LogLuminanceRange, 0.0f, 1.0f);
+				
+				return uint(logLuminance * 254.0 + 1.0); // ^The first bin is for luminance < EPSILON
+			}
+			
+			void Build() {
+				uint x = GlobalInvocationID.x;
+				uint y = GlobalInvocationID.y;
+				
+				// WARNING: NUM_OF_BINS % workgroupSize must be 0 for this to work!
+				// If not the same, we have to round binsPerWorkgroup up and do checks
+				// here and in the accumulation loop below to prevent out of bounds access
+				uint workgroupSize = THREADS_X * THREADS_Y;
+				uint binsPerWorkgroup = NUM_OF_BINS / workgroupSize;
+				for (uint i = 0; i < binsPerWorkgroup; ++i) {
+					curFrameLuminanceHistogramShared[i * workgroupSize + LocalInvocationIndex] = 0u;
+				}
+				
+				barrier();
+				
+				if(x < uint(ScreenSize.x) && y < uint(ScreenSize.y)){
+					ivec2 pixel = ivec2(x, y);
+					vec2 uv = (vec2(pixel) + vec2(0.5, 0.5)) / ScreenSize.zw;
+					vec3 color = texture2DLod(GameColor, uv, 0.0f).rgb;
+
+					if(PreExposureEnabled > 0.0){
+						float preExposure = texture2DLod(PreviousFrameAverageLuminance, vec2(0.5, 0.5), 0.0).r;
+						color.rgb = UnExposeLighting(color.rgb, preExposure);
+					}
+
+					float luminance = dot(color.rgb, vec3(0.2126f, 0.7152f, 0.0722f)); // To cd / m^2 using photometric/digital ITU BT.709
+					uint index = luminanceToHistogramBin(luminance);
+
+					// Multiply the histogram contribution for the current pixel by a Gaussian function, so that pixels near the
+					// center of the screen are weighted more heavily than pixels near the edges.
+					vec2 centerToPixel = uv - vec2(0.5, 0.5);
+					float weight = exp(-CenterWeight * dot(centerToPixel, centerToPixel));
+					uint weightFixed = uint(weight * kHistogramWeightScaleFactor);
+
+					atomicAdd(curFrameLuminanceHistogramShared[index], weightFixed);
+				}
+
+				barrier();
+				
+				for (uint i = 0; i < binsPerWorkgroup; ++i) {
+					uint histogramIndex = i * workgroupSize + LocalInvocationIndex;
+					atomicAdd(CurFrameLuminanceHistogram[histogramIndex].count, curFrameLuminanceHistogramShared[histogramIndex]);
+				}
+			}
+		}
+	}
+	
+	Pass "CalculateAverage"
+	{
+		[Flag] ThreadLimit : LimitedAt128, Native
+
+		[Option] GraphicsProfile : HiDef
+		[Option] Fallback : Fallback
+
+		[Option] KernelFunction : Average
+		[Option] Threads : "1, 1, 1"
+		
+		Shader : Compute
+		{
+			void Average() {
+				float prevLuminance = texture2DLod(PreviousFrameAverageLuminance, vec2(0.5, 0.5), 0.0).r;
+				float adaptedLuminance = ComputeAverageLuminance(prevLuminance);
+				imageStore(AdaptedFrameAverageLuminance, ivec2(0, 0), vec4(adaptedLuminance, adaptedLuminance, adaptedLuminance, adaptedLuminance));
+			}
+		}
+	}
+	
+	Pass "CalculateAverageFragment"
+	{
+		// This is redundant but unfortunately necessary because the flag is
+		// used in the shared section indiscriminately.
+		[Flag] ThreadLimit : LimitedAt128, Native
+
+		[Option] GraphicsProfile : HiDef
+		[Option] Fallback : Fallback
+		
+		[VertexInput:vec4] position : POSITION
+		// TODO: we may be able to remove the bottom 2
+		[VertexInput:vec2] texcoord0 : TEXCOORD0
+		[FragmentInput:vec2] texcoord0 : TEXCOORD0
+
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+	
+		Shader : Custom
+		{
+			float getCurFrameHistogramCount(uint i) {
+				return float(CurFrameLuminanceHistogram[i].count);
+			}
+			
+			void Vert(VertexInput vertInput, inout VertexOutput vertOutput) {
+				vertOutput.position = vec4(vertInput.position.xy * 2.0 - 1.0, 0.0, 1.0);
+				vertOutput.texcoord0 = vec2(vertInput.texcoord0.x, vertInput.texcoord0.y);
+			}
+	
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				float prevLuminance = texture2DLod(PreviousFrameAverageLuminance, vec2(0.5, 0.5), 0.0).r;
+				float adaptedLuminance = ComputeAverageLuminance(prevLuminance);
+				fragOutput.Color0 = vec4_splat(adaptedLuminance);
+			}
+		}
+	}
+}

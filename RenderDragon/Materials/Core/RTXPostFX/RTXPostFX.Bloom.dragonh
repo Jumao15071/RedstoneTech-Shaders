@@ -1,0 +1,96 @@
+/**********************************************************************************************************************
+# Copyright (c) 2019, NVIDIA CORPORATION. All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
+# following conditions are met:
+#  * Redistributions of code must retain the copyright notice, this list of conditions and the following disclaimer.
+#  * Neither the name of NVIDIA CORPORATION nor the names of its contributors may be used to endorse or promote products
+#    derived from this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT
+# SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA,
+# OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+**********************************************************************************************************************/
+
+#pragma once
+
+// Gaussian weights for 4x4 gaussian kernel, with taps centered between pixels (assumes bilinear filtering)
+static const float bloomGauss[2][2] = {
+	{0.1633997,  0.03871393},
+	{0.03871393, 0.009172405}
+};
+
+vec3 gaussianBlurPass(vec2 pixelUvs, vec2 pixelSize) {
+	vec2 halfPixelSize = pixelSize * 0.5;
+	int halfFilterSize = 2; //< Keep in sync with pre-generated weights in bloomGauss
+
+	vec3 result = 0.0f;
+
+	for (int i = -halfFilterSize; i < halfFilterSize; ++i) {
+		for (int j = -halfFilterSize; j < halfFilterSize; ++j) {
+			vec2 offset = vec2(i, j) * pixelSize + halfPixelSize;
+			float weight = bloomGauss[i < 0 ? -i - 1 : i][j < 0 ? -j - 1 : j];
+			result += texture2D(RasterColor, pixelUvs + offset).rgb * weight;
+		}
+	}
+
+	return result;
+}
+
+bool isNaNOrInf(float x) {
+#if BGFX_SHADER_LANGUAGE_HLSL > 2
+	return (asuint(x) & 0x7F800000) == 0x7F800000;
+#else
+	return false;
+#endif
+}
+
+bool anyIsNaNOrInf(vec3 v) {
+	return (isNaNOrInf(v.x) || isNaNOrInf(v.y) || isNaNOrInf(v.z));
+}
+
+// This used to do a 3x3 filter pass, but I tried a split-screen
+// with it just taking a simple bilinear sample, and I couldn't
+// see any difference at all.  So going with that.
+//      - Oli
+vec3 uniformBlurPass(vec2 pixelUvs, vec2 pixelSize, bool doNaNCheck) {
+	vec3 result = texture2D(RasterColor, pixelUvs).rgb;
+
+	if(!doNaNCheck) {
+		return max(result, 0);
+	} else {
+		// NaN stoppers. These are necessary to prevent corrupt values from propagating across the screen
+		// This pass is executed as first and only once for bloom calculation, so NaN stoppers can be omitted from other passes
+		if (!anyIsNaNOrInf(result)) {
+			return max(result, 0);
+		}
+		else {
+			return vec3(0, 0, 0);
+		}
+	}
+}
+
+vec4 applyBloomFinalPass(FragmentInput fragInput) {
+	vec3 originalInput = texture2D(gBloomOriginalInput, fragInput.texcoord0).rgb;
+	// Used to be gaussianBlurPass but didn't add anything, except time
+	vec3 bloom = uniformBlurPass(fragInput.texcoord0, ScreenSize.zw, false/*doNaNCheck*/);
+	return vec4(lerp(originalInput, bloom, gBloomMultiplier), 1);
+}
+
+vec4 applyUpscalePass(FragmentInput fragInput) {
+	// Used to be gaussianBlurPass but didn't add anything, except time
+	return vec4(uniformBlurPass(fragInput.texcoord0, ScreenSize.zw, false/*doNaNCheck*/), 1);
+}
+
+vec4 applyDownscaleGaussianPass(FragmentInput fragInput) {
+	return vec4(gaussianBlurPass(fragInput.texcoord0, ScreenSize.zw), 1);
+}
+
+vec4 applyDownscaleUniformPass(FragmentInput fragInput) {
+	// Simple downscale, but with the NaN check so that we're sure that subsequent passes are safe.
+	return vec4(uniformBlurPass(fragInput.texcoord0, ScreenSize.zw, true/*doNaNCheck*/), 1);
+}

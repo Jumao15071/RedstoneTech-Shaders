@@ -1,0 +1,17 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+[Sampler:2D] InputTexture
+[Sampler:2D] GbufferDepth
+[Sampler:2D] GbufferNormal
+[Sampler:2D] GbufferRoughness
+[Sampler:2D] PreviousReflectionBuffer
+
+[Vector] SSRRayMarchingParams
+[Vector] SSRFadingParamsAndThickness // x = horizontal fading power, y = vertical fading power, z = fade distance, w = thickness
+[Vector] SSRRoughnessCutoffParams
+[Vector] SSRTemporalAccumulationParams
+
+[Vector] UnitPlaneExtents // x = tan(fov/2) * aspect, y = tan(fov/2)
+[Vector] CameraData // near plane, far plane, aspect ratio, unused
+[Vector] ViewportScale : (1.0, 1.0, 0.0, 0.0)

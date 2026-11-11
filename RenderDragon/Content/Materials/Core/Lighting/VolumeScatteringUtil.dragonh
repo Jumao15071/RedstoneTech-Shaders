@@ -1,0 +1,172 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+#pragma once
+
+// Exponent controlling the degree of logarithmic warping for the W-coordinate in volume space.
+#define DEPTH_EXPONENT 4.0
+
+// Converts from linear depth to logarithmically warped depth (both in the [0, 1] range).
+float linearToLogDepth(float linearDepth) {
+	return log((exp(DEPTH_EXPONENT) - 1.0) * linearDepth + 1.0) / DEPTH_EXPONENT;
+}
+
+// Converts from logarithmically warped depth to linear depth (both in the [0, 1] range).
+float logToLinearDepth(float logDepth) {
+	return (exp(DEPTH_EXPONENT * logDepth) - 1.0) / (exp(DEPTH_EXPONENT) - 1.0);
+}
+
+// Converts from normalized device coordinates to volume-space texture coordinates, using the
+// inverse projection matrix and the near and far planes.
+//
+// In NDC space, X- and Y-coordinates within a given depth slice of the view frustum are mapped to
+// the [-1, 1] x [-1, 1] range, and the Z coordinate within the view frustum is mapped to either the
+// [0, 1] range (in Direct3D, Metal, and Vulkan) or the [-1, 1] range (in OpenGL). UVW texture
+// coordinates for our volume are all in the [0, 1] range.
+//
+// In NDC space, the X- and Y-coordinates vary linearly within a given depth slice, so all we need
+// to do is map them linearly to [0, 1]. However, the Z-coordinate does not vary linearly with
+// depth, so we need to convert it back to linear view-space depth using the inverse projection
+// matrix and then map it linearly to the [0, 1] range using the near and far planes.
+//
+// Finally, we apply a logarithmic warping to the W-coordinate so that depth slices are spaced more
+// closely together near the camera.
+vec3 ndcToVolume(vec3 ndc, mat4 inverseProj, vec2 nearFar) {
+	// Convert XY from [-1, 1] to [0, 1] range.
+	vec2 uv = 0.5 * (ndc.xy + vec2(1.0, 1.0));
+
+	// Convert from nonlinear NDC depth to linear view-space depth, and then to linear depth in a [0, 1] range
+	vec4 view = mul(inverseProj, vec4(ndc, 1.0));
+	float viewDepth = -view.z / view.w;
+	float wLinear = (viewDepth - nearFar.x) / (nearFar.y - nearFar.x);
+
+	// Apply logarithmic depth warping
+	return vec3(uv, linearToLogDepth(wLinear));
+}
+
+// Converts from volume texture coordinates to normalized device coordinates, using the projection
+// matrix and the near and far planes.
+//
+// Inverts the ndcToVolume transformation. See ndcToVolume for more details.
+vec3 volumeToNdc(vec3 uvw, mat4 proj, vec2 nearFar) {
+	// Convert XY from [0, 1] to [-1, 1] range
+	vec2 xy = 2.0 * uvw.xy - vec2(1.0, 1.0);
+
+	// Invert logarithmic depth warping
+	float wLinear = logToLinearDepth(uvw.z);
+
+	// Convert from linear depth in a [0, 1] range to linear view-space depth, and then to nonlinear NDC depth
+	float viewDepth = -((1.0 - wLinear) * nearFar.x + wLinear * nearFar.y);
+	vec4 ndcDepth = mul(proj, vec4(0.0, 0.0, viewDepth, 1.0));
+	float z = ndcDepth.z / ndcDepth.w;
+
+	return vec3(xy, z);
+}
+
+// Converts from world-space coordinates to volume-space texture coordinates, using the
+// concatenated view-projection matrix, the inverse projection matrix, and the near and far
+// planes.
+vec3 worldToVolume(vec3 world, mat4 viewProj, mat4 invProj, vec2 nearFar) {
+	vec4 proj = mul(viewProj, vec4(world, 1.0));
+	vec3 ndc = proj.xyz / proj.w;
+	return ndcToVolume(ndc, invProj, nearFar);
+}
+
+// Converts from volume-space texture coordinates to world-space coordinates, using the
+// inverse of the concatenated view-projection matrix, the projection matrix, and the near and far
+// planes.
+vec3 volumeToWorld(vec3 uvw, mat4 invViewProj, mat4 proj, vec2 nearFar) {
+	vec3 ndc = volumeToNdc(uvw, proj, nearFar);
+	vec4 world = mul(invViewProj, vec4(ndc, 1.0));
+	return world.xyz / world.w;
+}
+
+// Samples from a 2D array texture as if it were a 3D texture, by sampling from the two nearest
+// texture slices (with hardware bilinear interpolation) and then linearly interpolating between
+// the results.
+vec4 sampleVolume(highp sampler2DArray volume, ivec3 dimensions, vec3 uvw) {
+	// Subtract an 0.5-texel offset to match the behavior of trilinear interpolation for 3D textures
+	float depth = uvw.z * float(dimensions.z) - 0.5;
+	int index = clamp(int(depth), 0, dimensions.z - 2);
+	float offset = clamp(depth - float(index), 0.0, 1.0);
+
+	vec4 a = texture2DArrayLod(volume, vec3(uvw.xy, index), 0.0).rgba;
+	vec4 b = texture2DArrayLod(volume, vec3(uvw.xy, index + 1), 0.0).rgba;
+
+	return mix(a, b, offset);
+}
+
+// Applies scattering values (source and extinction terms) to a surface shading result.
+vec3 applyScattering(vec4 sourceExtinction, vec3 color) {
+	// The RGB channels represent the accumulated source term (emission + in-scattering).
+	// The A channel represents the extinction term (absorption + out-scattering).
+	// The input color is attenuated by the extinction term, and then the source term is added to the result.
+	return sourceExtinction.rgb + sourceExtinction.a * color;
+}
+
+struct TemporalAccumulationParameters {
+	ivec3 dimensions;
+	vec3 previousUvw;
+	vec4 currentValue;
+
+	// Weight (between 0.0 and 1.0) used for blending between the previous and current value. Lower values mean slower
+	// adaptation and higher values mean faster.
+	float historyWeight;
+
+	// Controls the steepness of the transition at the frustum boundary between using history and discarding it.
+	float frustumBoundaryFalloff;
+};
+
+TemporalAccumulationParameters createTemporalAccumulationParameters(
+	ivec3 dimensions,
+	vec3 previousUvw,
+	vec4 currentValue,
+	float historyWeight,
+	float frustumBoundaryFalloff){
+
+	TemporalAccumulationParameters params;
+
+	params.dimensions = dimensions;
+	params.previousUvw = previousUvw;
+	params.currentValue = currentValue;
+	params.historyWeight = historyWeight;
+	params.frustumBoundaryFalloff = frustumBoundaryFalloff;
+
+	return params;
+}
+
+// Performs temporal accumulation given a volume to sample from the previous frame, a reprojected sample location, and
+// the new value for the current frame.
+vec4 blendHistory(TemporalAccumulationParameters params, highp sampler2DArray previousVolume) {
+	vec4 previousValue = sampleVolume(previousVolume, params.dimensions, params.previousUvw);
+
+	// When the reprojected sample position for the previous frame falls outside the frustum bounds, we don't have
+	// valid history data for the current sample, and sampleVolume clamps the sample position to the nearest point on
+	// the frustum boundary. Here, we smoothly transition from using history to discarding it based on how far the sample
+	// position is outside the frustum boundary.
+	vec3 previousTexelCoord = VolumeDimensions.xyz * params.previousUvw;
+	vec3 previousTexelCoordClamped = clamp(previousTexelCoord, vec3(0.0, 0.0, 0.0), vec3(params.dimensions));
+	float distanceFromBoundary = length(previousTexelCoordClamped - previousTexelCoord);
+	float rejectHistory = saturate(distanceFromBoundary * params.frustumBoundaryFalloff);
+	float blendWeight = mix(params.historyWeight, 0.0, rejectHistory);
+
+	return mix(params.currentValue, previousValue, blendWeight);
+}
+
+// In order to be energy-conserving, phase functions must integrate to 1 over the unit sphere, and the
+// surface area of the unit sphere is 4pi.
+CONST(float kInv4Pi) = 1.0f / (4.0f * M_PI);
+
+// Henyey-Greenstein phase function.
+//
+// cosTheta is the cosine of the angle between the view vector and the light vector.
+//
+// g is the asymmetry parameter, which must be in the range (-1, 1). Positive values result in more
+// forward-scattering, negative values result in more back-scattering, and a value of zero results in an
+// isotropic phase function (scattering is equally likely in all directions).
+//
+// Source: https://pbr-book.org/3ed-2018/Volume_Scattering/Phase_Functions
+float henyeyGreenstein(float cosTheta, float g) {
+	float denom = (1.0 + g * g + 2.0 * g * cosTheta);
+	return kInv4Pi * (1.0 - g * g) / (denom * sqrt(denom));
+}

@@ -1,0 +1,525 @@
+/********************************************************
+*   (c) Mojang. All rights reserved                     *
+*   (c) Microsoft. All rights reserved.                 *
+*********************************************************/
+
+#pragma once
+
+#define NUM_CASCADES 8
+#define NUM_CASCADE_SETS 4
+
+#if !defined(PCFScale)
+#define PCFScale 1.0
+#endif
+
+#define DIRECTIONAL_SHADOWS_OFF 0
+#define DIRECTIONAL_SHADOWS_CASCADED 1
+
+struct ShadowParameters {
+	vec4 cascadeShadowResolutions;
+	vec4 shadowBias;
+	vec4 shadowSlopeBias;
+	vec4 shadowPCFWidth;
+	int cloudshadowsEnabled;
+	float cloudshadowContribution;
+	float cloudshadowPCFWidth;
+	vec4 shadowParams;
+	mat4 cloudShadowProj;
+};
+
+struct DirectionalLightParams {
+	mat4 shadowProj[4];
+	int cascadeCount;
+	int isSun;
+	int index;
+};
+
+struct CascadeParameters {
+	float mResolution;
+	float mBias;
+	float mSlopeBias;
+	float mPCFWidth;
+	float mNdLFloor;
+};
+
+ShadowParameters createShadowParams(
+	vec4 cascadeShadowResolutions,
+	vec4 shadowBias,
+	vec4 shadowSlopeBias,
+	vec4 shadowPCFWidth,
+	int cloudshadowsEnabled,
+	float cloudshadowContribution,
+	float cloudshadowPCFWidth,
+	vec4 shadowParams,
+	mat4 cloudShadowProj) {
+
+	ShadowParameters params;
+
+	params.cascadeShadowResolutions = cascadeShadowResolutions;
+	params.shadowBias = shadowBias;
+	params.shadowSlopeBias = shadowSlopeBias;
+	params.shadowPCFWidth = shadowPCFWidth;
+	params.cloudshadowsEnabled = cloudshadowsEnabled;
+	params.cloudshadowContribution = cloudshadowContribution;
+	params.cloudshadowPCFWidth = cloudshadowPCFWidth;
+	params.shadowParams = shadowParams;
+	params.cloudShadowProj = cloudShadowProj;
+
+	return params;
+}
+
+CascadeParameters getCascadeParameters(int cascade, float ndlFloor) {
+	CascadeParameters params;
+	params.mResolution = CascadesParameters[cascade].x;
+	params.mBias       = CascadesParameters[cascade].y;
+	params.mSlopeBias  = CascadesParameters[cascade].z;
+	params.mPCFWidth   = CascadesParameters[cascade].w;
+	params.mNdLFloor   = ndlFloor;
+	return params;
+}
+
+bool isShadowedByLight(vec3 worldPos, vec3 geoNormal, vec3 lightWorldDir, float tMin, float tMax) {
+	return false;
+}
+
+bool areShadowsEnabled(float enabled) {
+	return enabled != 0.0;
+}
+
+bool areCascadedShadowsEnabled(float mode) {
+	return int(mode) == DIRECTIONAL_SHADOWS_CASCADED;
+}
+
+float calculateShadowBias(float shadowBias, float shadowSlopeBias, float NdL, float NdLFloor) {
+	// Uses the identity: tan(acos(x)) = sqrt(1 - x^2)/x
+	NdL = clamp(NdL, NdLFloor, 1.0);
+	float biasMultiplier = sqrt(1.0 - pow2(NdL)) / NdL;
+	return shadowBias + shadowSlopeBias * (biasMultiplier);
+}
+
+// Compute weights for bilinear interpolation given the dimensions of a (square) texture and a set
+// of UV coordinates.
+vec2 bilinearWeights(float textureDimensions, vec2 uv) {
+	vec2 pixel = (uv * textureDimensions) + vec2(0.5, 0.5);
+	return fract(pixel);
+}
+
+// Perform bilinear filtering on the results of a textureGather operation given a set of weights.
+//
+// textureGather packs the four nearest texels into a vec4 like this:
+//
+// +---+---+
+// | w | z |
+// +---+---+
+// | x | y |
+// +---+---+
+//
+// The X- and Y-components of the weight vector are used to interpolate in the horizontal and vertical
+// directions respectively.
+float bilinearFilter(vec4 samples, vec2 weights) {
+	return mix(mix(samples.w, samples.z, weights.x), mix(samples.x, samples.y, weights.x), weights.y);
+}
+
+// Perform bilinear percentage-closer filtering given a comparison value and a set of depth values
+// sampled using textureGather.
+//
+// A shadow depth test is performed against `comparisonValue` for each value in the `samples`
+// vector. The results of the depth tests are then bilinearly interpolated using `weights`.
+float bilinearPCF(vec4 samples, vec2 weights, float comparisonValue) {
+	vec4 comparisonTests = step(comparisonValue, samples);
+	return bilinearFilter(comparisonTests, weights);
+}
+
+// Given a set of depth values sampled using textureGather, a comparison value, and a falloff
+// scale, compute a transmittance value for each depth value, and then bilinearly interpolate
+// the results.
+//
+// The falloff function is currently smoothstep, but this can be changed.
+float bilinearTransmittance(vec4 samples, vec2 weights, float comparisonValue, float falloffScale) {
+	vec4 transmittanceValues = 1.0 - smoothstep(0.0, 1.0, (comparisonValue - samples) * falloffScale);
+	return bilinearFilter(transmittanceValues, weights);
+}
+
+bool pointInFrustum(vec4 projPos) {
+	vec3 p = abs(projPos.xyz);
+	return p.x <= 1.0 && p.y <= 1.0 && p.z <= 1.0;
+}
+
+vec4 getShadowProjectionPosition(int cascadeIndex, vec3 worldPos) {
+	vec4 projPos = mul(CascadesShadowProj[cascadeIndex], vec4(worldPos, 1.0));
+
+#if !(BGFX_SHADER_LANGUAGE_GLSL)
+	// Doesn't matter if this is done before or after pointInFrustum, result is the same
+	projPos.y *= -1.f;
+#endif
+
+	return projPos;
+}
+
+bool InShadowCascade(int cascadeIndex, vec3 worldPos, out vec4 projPos) {
+	projPos = getShadowProjectionPosition(cascadeIndex, worldPos);
+	return pointInFrustum(projPos);
+}
+
+// Conversion factor for transforming from shadow map depth values to world-space distances.
+// This could be calculated on the CPU instead
+float getShadowMapDepthRange(int cascadeIndex) {
+	// Same as length(CascadesShadowInvProj[cascadeIndex][3]) but most shader compilers recognize this anyway
+	return length(mul(CascadesShadowInvProj[cascadeIndex], vec4(0.0, 0.0, 1.0, 0.0)));
+}
+
+vec3 getOffsetWorldPosition(vec3 worldPos, vec3 worldNormal, float NdL) {
+	// Offsets the position of the fragment along its normal
+	// Helps guard against shadow artifacts	that occur because of hard edges
+	return worldPos + (ShadowNormalOffsetStrength * worldNormal) * saturate(1.0 - NdL);
+}
+
+float applyShadowFade(float amt, float viewDepth) {
+	float shadowFade = smoothstep(max(0.0, ShadowRangeFar - min(ShadowRangeFar * 0.1, 8.0)), ShadowRangeFar, -viewDepth);
+	return mix(amt, 1.0, shadowFade);
+}
+
+vec3 DebugShadowCascade(vec3 worldPos) {
+	vec4 projPos;
+
+#if BGFX_SHADER_LANGUAGE_GLSL
+	vec3 cascadeColor[8] = vec3[8](
+		vec3(1,0,0),
+		vec3(0,1,0),
+		vec3(0,0,1),
+		vec3(1,1,0),
+		vec3(0,1,1),
+		vec3(1,0,1),
+		vec3(1,0.5,0.5),
+		vec3(0.5,1,0.5)
+	);
+#else
+	vec3 cascadeColor[8] = {
+		vec3(1,0,0),
+		vec3(0,1,0),
+		vec3(0,0,1),
+		vec3(1,1,0),
+		vec3(0,1,1),
+		vec3(1,0,1),
+		vec3(1,0.5,0.5),
+		vec3(0.5,1,0.5)
+	};
+#endif
+
+	// TODO: figure out how to make this more scalable (when we add in official range support)
+	for (int cascade = 0; cascade < 8; ++cascade) {
+		if (!InShadowCascade(cascade, worldPos, projPos)) {
+			continue;
+		}
+		return cascadeColor[cascade];
+	}
+
+	return vec3(1.f,1.f,1.f);
+}
+
+float GetFilteredCloudShadow(vec3 worldPos, float NdL, vec4 ndlFloorValues) {
+	const int cloudCascade = 0;
+	CascadeParameters cascadeParams = getCascadeParameters(cloudCascade, ndlFloorValues[cloudCascade]);
+
+	vec4 cloudProjPos = mul(CloudShadowProj, vec4(worldPos, 1.0));
+	cloudProjPos /= cloudProjPos.w;
+
+	float bias = calculateShadowBias(cascadeParams.mBias, cascadeParams.mSlopeBias, NdL, cascadeParams.mNdLFloor);
+
+#if !(BGFX_SHADER_LANGUAGE_GLSL)
+		cloudProjPos.y *= -1.f;
+#endif
+
+	cloudProjPos.z -= bias / cloudProjPos.w;
+
+	vec2 cloudUv = (vec2(cloudProjPos.x, cloudProjPos.y) * 0.5f + 0.5f) * cascadeParams.mResolution;
+
+#if !BGFX_SHADER_LANGUAGE_ESSL || BGFX_SHADER_LANGUAGE_ESSL >= 300
+	const int MaxFilterWidth = 9;
+	int filterWidth = bool(ShadowFilteringDisabled) ? 1 : clamp(int(CloudShadowPCFWidth * PCFScale + 0.5f), 1, MaxFilterWidth);
+	int filterOffset = filterWidth / 2;
+
+	float amt = 0.f;
+
+#if (BGFX_SHADER_LANGUAGE_GLSL)
+	// OpenGL uses -1..1 for the depth range
+	cloudProjPos.z = cloudProjPos.z * 0.5 + 0.5;
+
+	// we also need to potentially offset the V coord if the cascade resolution
+	// is less than the default (ShadowMapSize x ShadowMapSize). This is to account for GL's UV mapping
+	cloudUv.y += 1.0 - cascadeParams.mResolution;
+#endif
+
+	float cloudShadowMapIndex = dot(CascadesPerSet, vec4(1.0, 1.0, 1.0, 1.0));
+
+	for (int iy = 0; iy < filterWidth; ++iy) {
+		for (int ix = 0; ix < filterWidth; ++ix) {
+			float y = float(iy - filterOffset) + 0.5f;
+			float x = float(ix - filterOffset) + 0.5f;
+
+			vec2 offset = vec2(x, y) * ShadowFilterOffset;
+			vec3 uvw = vec3(cloudUv + (offset * cascadeParams.mResolution), cloudShadowMapIndex);
+
+			if (bool(ShadowFilteringDisabled)) {
+				float shadowDepth = texture2DArrayLod(ShadowCascades, uvw, 0.0).r;
+				amt += float(shadowDepth >= cloudProjPos.z);
+			}
+			else {
+				vec4 shadowSamples = textureGather(ShadowCascades, uvw, 0);
+				vec2 weights = bilinearWeights(ShadowMapSize, uvw.xy);
+				amt += bilinearPCF(shadowSamples, weights, cloudProjPos.z);
+			}
+		}
+	}
+
+	return amt / float(filterWidth * filterWidth);
+#else
+	return 1.0f;
+#endif
+}
+
+float GetPlayerShadow(vec3 worldPos, float NdL, vec4 ndlFloorValues) {
+	const int playerCascade = 0;
+	CascadeParameters cascadeParams = getCascadeParameters(playerCascade, ndlFloorValues[playerCascade]);
+
+	vec4 playerProjPos = mul(PlayerShadowProj, vec4(worldPos, 1.0));
+
+	float bias = calculateShadowBias(cascadeParams.mBias, cascadeParams.mSlopeBias, NdL, cascadeParams.mNdLFloor);
+
+#if !(BGFX_SHADER_LANGUAGE_GLSL)
+	playerProjPos.y *= -1.f;
+#endif
+
+	playerProjPos.z -= bias;
+
+	// Depth can go out of bounds, if so, force it to max out at 1.0
+	playerProjPos.z = min(playerProjPos.z, 1.0);
+
+	vec2 playerUv = (vec2(playerProjPos.x, playerProjPos.y) * 0.5f + 0.5f) * FirstPersonPlayerShadowsResolution;
+
+#if !BGFX_SHADER_LANGUAGE_ESSL || BGFX_SHADER_LANGUAGE_ESSL >= 300
+	const int MaxFilterWidth = 9;
+	// TODO: Add a parameter for PCF width for the player shadow
+	int filterWidth = bool(ShadowFilteringDisabled) ? 1 : clamp(int(2.0f * PCFScale + 0.5f), 1, MaxFilterWidth);
+	int filterOffset = filterWidth / 2;
+
+	float amt = 0.f;
+
+#if (BGFX_SHADER_LANGUAGE_GLSL)
+	// OpenGL uses -1..1 for the depth range
+	playerProjPos.z = playerProjPos.z * 0.5 + 0.5;
+
+	// we also need to potentially offset the V coord if the cascade resolution
+	// is less than the default (FirstPersonPlayerShadowsTextureDimensionsxFirstPersonPlayerShadowsTextureDimensions). This is to account for GL's UV mapping
+	playerUv.y += 1.0 - FirstPersonPlayerShadowsResolution;
+#endif
+
+#if (BGFX_SHADER_LANGUAGE_GLSL)
+	bool inPlayerTextureBounds = playerUv.x >= 0.0 && playerUv.x < FirstPersonPlayerShadowsResolution && playerUv.y >= (1.0 - FirstPersonPlayerShadowsResolution) && playerUv.y < 1.0;
+#else
+	bool inPlayerTextureBounds = playerUv.x >= 0.0 && playerUv.x < FirstPersonPlayerShadowsResolution && playerUv.y >= 0.0 && playerUv.y < FirstPersonPlayerShadowsResolution;
+#endif
+	if (!inPlayerTextureBounds) {
+		return 1.0;
+	}
+
+	float playerShadowMapIndex = dot(CascadesPerSet, vec4(1.0, 1.0, 1.0, 1.0)) + 1.0;
+
+	for (int iy = 0; iy < filterWidth; ++iy) {
+		for (int ix = 0; ix < filterWidth; ++ix) {
+			float y = float(iy - filterOffset) + 0.5f;
+			float x = float(ix - filterOffset) + 0.5f;
+
+			vec2 offset = vec2(x, y) * FirstPersonPlayerShadowsFilterWidth;
+			vec2 newUv = playerUv + (offset * FirstPersonPlayerShadowsResolution);
+			vec3 uvw = vec3(newUv.x, newUv.y, playerShadowMapIndex);
+
+			if (bool(ShadowFilteringDisabled)) {
+				float shadowDepth = texture2DArrayLod(ShadowCascades, uvw, 0.0).r;
+				amt += float(shadowDepth >= playerProjPos.z);
+			}
+			else {
+				vec4 shadowSamples = textureGather(ShadowCascades, uvw, 0);
+				vec2 weights = bilinearWeights(ShadowMapSize, uvw.xy);
+				amt += bilinearPCF(shadowSamples, weights, playerProjPos.z);
+			}
+		}
+	}
+
+	return amt / float(filterWidth * filterWidth);
+#else
+	return 1.0f;
+#endif
+}
+
+float GetFilteredShadow(float projZ, int cascade, float resolution, float pcfWidth, vec2 uv, float bias, float falloffScale, out float transmittance) {
+#if !BGFX_SHADER_LANGUAGE_ESSL || BGFX_SHADER_LANGUAGE_ESSL >= 300
+	const int MaxFilterWidth = 9;
+	int filterWidth = bool(ShadowFilteringDisabled) ? 1 : clamp(int(pcfWidth * PCFScale + 0.5), 1, MaxFilterWidth);
+	int filterOffset = filterWidth / 2;
+
+	float amt = 0.f;
+
+	vec2 baseUv = uv * resolution;
+#if (BGFX_SHADER_LANGUAGE_GLSL)
+	// OpenGL uses -1..1 for the depth range
+	projZ = projZ * 0.5 + 0.5;
+
+	// we also need to potentially offset the V coord if the cascade resolution
+	// is less than the default (ShadowMapSize x ShadowMapSize). This is to account for GL's UV mapping
+	baseUv.y += 1.0 - resolution;
+#endif
+
+	float transmittanceTotal = 0.0;
+	for (int iy = 0; iy < filterWidth; ++iy) {
+		for (int ix = 0; ix < filterWidth; ++ix) {
+			float y = float(iy - filterOffset) + 0.5f;
+			float x = float(ix - filterOffset) + 0.5f;
+
+			vec2 offset = vec2(x, y) * ShadowFilterOffset;
+
+			// cascade index represents the directional light being evaluated
+			// cascade is the cascade number within that light to check
+			vec2 uv = vec2(baseUv + (offset * resolution));
+
+			float w = float(cascade);
+			vec4 shadowSamples = textureGather(ShadowCascades, vec3(uv, w), 0);
+
+			vec2 weights = bilinearWeights(ShadowMapSize, uv);
+			transmittanceTotal += bilinearTransmittance(shadowSamples, weights, projZ, falloffScale);
+
+			if (bool(ShadowFilteringDisabled)) {
+				float shadowDepth = shadowSamples.a;
+				amt += float(shadowDepth >= (projZ - bias));
+			}
+			else {
+				amt += bilinearPCF(shadowSamples, weights, projZ - bias);
+			}
+		}
+	}
+
+	transmittance = transmittanceTotal / float(filterWidth * filterWidth);
+	return amt / float(filterWidth * filterWidth);
+#else
+	transmittance = 1.0;
+	return 1.0;
+#endif
+}
+
+float GetSingleCascadeAmount(int cascade, vec4 projPos, float NdL, vec4 ndlFloorValues, float transmittanceFalloffScale, out float transmittance) {
+	transmittance = 1.0;
+
+	CascadeParameters cascadeParameters = getCascadeParameters(cascade, ndlFloorValues[cascade]);
+	float bias = calculateShadowBias(cascadeParameters.mBias, cascadeParameters.mSlopeBias, NdL, cascadeParameters.mNdLFloor);
+	vec2 uv = vec2(projPos.x, projPos.y) * 0.5f + 0.5f;
+
+	// Conversion factor for transforming from shadow map depth values to world-space distances.
+	float shadowMapDepthRange = getShadowMapDepthRange(cascade);
+
+	// The falloff function for subsurface scattering is specified in world space. Combine it with the multiplier for
+	// converting shadow map depth values to world space.
+	float falloffScale = transmittanceFalloffScale * shadowMapDepthRange;
+
+	float amt = GetFilteredShadow(projPos.z, cascade, cascadeParameters.mResolution, cascadeParameters.mPCFWidth, uv, bias, falloffScale, transmittance);
+	return amt;
+}
+
+float GetCascadedShadowAmount(vec3 worldPos, float NdL, vec4 ndlFloorValues, float transmittanceFalloffScale, out float transmittance) {
+	transmittance = 1.0;
+	float amt = 1.0;
+
+	// Counts how many components of CascadesPerSet have a non-zero value
+	// This assumes the values in CascadesPerSet are sequentially ordered, non-negative integers
+	int activeCascadeSets = int(dot(saturate(CascadesPerSet), vec4_splat(1.0)));
+	int cascadeIdx = 0;
+
+	// Iterate over the active cascade sets
+	for (int cascadeSet = 0; cascadeSet < activeCascadeSets; ++cascadeSet) {
+		int cascadeCount = int(CascadesPerSet[cascadeSet]);
+
+		// Iterate over all cascades up-to the max allowable cascade index
+		int endIdx = min(cascadeIdx + cascadeCount, NUM_CASCADES);
+		while (cascadeIdx < endIdx) {
+			vec4 projPos = vec4_splat(0.0);
+			if (InShadowCascade(cascadeIdx, worldPos, projPos)) {
+				float cascadeTransmittance = 1.0;
+				amt = min(amt, GetSingleCascadeAmount(cascadeIdx, projPos, NdL, ndlFloorValues, transmittanceFalloffScale, cascadeTransmittance));
+				transmittance = min(transmittance, cascadeTransmittance);
+
+				// Cascade found! Jump ahead to the end of the cascade set's range effectively breaking the while-loop
+				cascadeIdx = endIdx;
+			}
+			else {
+				cascadeIdx++;
+			}
+		}
+	}
+
+	return amt;
+}
+
+float GetPlayerShadowAmount(vec3 worldPos, float NdL, vec4 ndlFloorValues) {
+	// In the future, we should consider moving all numbers and functions related to Minecraft specific objects to MCPE
+
+	float playerAmt = 1.0;
+	
+	// Allow for player shadow contribution, if enabled
+	if (int(FirstPersonPlayerShadowsEnabled) > 0) {
+		playerAmt = GetPlayerShadow(worldPos, NdL, ndlFloorValues);
+	}
+
+	return playerAmt;
+}
+
+float GetCloudShadowAmount(vec3 worldPos, float NdL, vec4 ndlFloorValues) {
+	// In the future, we should consider moving all numbers and functions related to Minecraft specific objects to MCPE
+
+	float amt = 1.0;
+	float cloudAmt = 1.0;
+
+	if (int(CloudShadowsVisible) > 0 && int(CloudShadowsEnabled) > 0) {
+		cloudAmt = GetFilteredCloudShadow(worldPos, NdL, ndlFloorValues);
+
+		// if this pixel is covered in cloud shadow, we want to take the "strongest" shadow
+		// i.e. if it's covered by cloud as well as another object, the other object's shadow will be stronger
+		if (cloudAmt < 1.0) {
+			// Cloud shadows should have limited shadow contribution
+			cloudAmt = max(cloudAmt, 1.0 - CloudShadowContribution);
+			amt = min(amt, cloudAmt);
+		}
+	}
+
+	return amt;
+}
+
+float GetPlayerAndCloudShadowAmount(vec3 worldPos, float NdL, vec4 ndlFloorValues) {
+	// In the future, we should consider moving all numbers and functions related to Minecraft specific objects to MCPE
+	float amt = GetPlayerShadowAmount(worldPos, NdL, ndlFloorValues);
+	amt = min(amt, GetCloudShadowAmount(worldPos, NdL, ndlFloorValues));
+
+	return amt;
+}
+
+float GetShadowAmount(vec3 worldPos, vec3 worldNormal, float NdL, vec4 ndlFloorValues, float viewDepth, float transmittanceFalloffScale, out float transmittance) {
+	vec3 offsetPosition = getOffsetWorldPosition(worldPos, worldNormal, NdL);
+
+	float amt = GetCascadedShadowAmount(offsetPosition, NdL, ndlFloorValues, transmittanceFalloffScale, transmittance);
+	amt = min(amt, GetPlayerAndCloudShadowAmount(offsetPosition, NdL, ndlFloorValues));
+	amt = applyShadowFade(amt, viewDepth);
+
+	return amt;
+}
+
+float GetShadowAmountWithCascade(int cascadeIndex, vec3 worldPos, vec3 worldNormal, float NdL, vec4 ndlFloorValues, float viewDepth, float transmittanceFalloffScale, out float transmittance) {
+	vec3 offsetPosition = getOffsetWorldPosition(worldPos, worldNormal, NdL);
+	vec4 projPos = getShadowProjectionPosition(cascadeIndex, offsetPosition);
+
+	float cascadeTransmittance;
+	float amt = GetSingleCascadeAmount(cascadeIndex, projPos, NdL, ndlFloorValues, transmittanceFalloffScale, cascadeTransmittance);
+	transmittance = min(1.0, cascadeTransmittance);
+
+	amt = min(amt, GetPlayerAndCloudShadowAmount(offsetPosition, NdL, ndlFloorValues));
+	amt = applyShadowFade(amt, viewDepth);
+
+	return amt;
+}

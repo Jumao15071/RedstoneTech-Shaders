@@ -1,0 +1,196 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+MaterialDefinition "ScreenSpaceReflections" : "PostFX"
+{
+	Properties
+	{
+		$import "ScreenSpaceReflectionsUniforms.dragonprop"
+	}
+
+	Shared {
+		Code {
+			#include "ScreenSpaceReflectionsUtil.dragonh"
+			#include "ScreenSpaceReflectionsUniformAliases.dragonh"
+		}
+	}
+
+	Pass "SSRRayMarch"
+	{
+		[FragmentInput:vec4] projPosition : TEXCOORD1
+
+		[Option] VertexFunction : RayMarchVert
+		[Option] FragmentFunction : Frag
+
+		Shader : Custom
+		{
+			#include "Util/UVUtil.dragonh"
+
+			void RayMarchVert(VertexInput vertInput, inout VertexOutput vertOutput) {
+				Vert(vertInput, vertOutput);
+				vertOutput.projPosition = vec4(vertOutput.position);
+			}
+
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput)
+			{
+				// Sample & start ray-marching from the center of texels rather than the corner
+				fragInput.texcoord0.xy = centerUV(fragInput.texcoord0.xy, ScreenSize);
+
+				float roughness = texture2D(GbufferRoughness, fragInput.texcoord0.xy).a;
+				// Early out for fragments that are rougher than the roughness cutoff
+				if(roughness > RoughnessCutoff) {
+					fragOutput.Color0 = vec4(0.0f, 0.0f, 0.0f, MISSED_RAY_HIT_VALUE);
+				}
+				else {
+					fragOutput.Color0 = RayMarch(
+						fragInput.texcoord0.xy,
+						fragInput.projPosition.xy,
+						roughness,
+						MaxStepsCount,
+						RayStepLength,
+						Thickness,
+						Offset,
+						BinarySearchStepsCount,
+						FadingPowerHorizontal,
+						FadingPowerVertical,
+						FadingDistance,
+						RoughnessCutoff,
+						RoughnessFadeStart,
+						CameraData.x,
+						CameraData.y,
+						CameraData.z,
+						UnitPlaneExtents.xy,
+						ScreenSize,
+						ViewportScale.xy,
+						GbufferDepth,
+						GbufferNormal
+					);
+				}
+			}
+		}
+	}
+	
+	Pass "SSRFillGaps"
+	{
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+		
+		[Flag] ExtendedGapFill : Off, On
+
+		Shader : Custom
+		{
+			vec4 getSample(vec2 uv, vec2 offset) {
+				vec4 result = texture2D(InputTexture, uv + offset);
+				
+				// If the value sampled above is not a ray hit, try the next one above or below.
+				if (!isRayHit(result.a)) {
+					result = texture2D(InputTexture, uv + (offset * 2.0));
+				}
+			
+				return result;
+			}
+
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput)
+			{
+				vec2 uv = fragInput.texcoord0.xy;
+				vec2 pixelSize = ScreenSize.zw;
+				
+				vec4 data = texture2D(InputTexture, uv);
+				
+				if (!isRayHit(data.a)) {
+#if flag(ExtendedGapFill, On)
+					vec4 up = getSample(uv, vec2(0.0, +pixelSize.y));
+					vec4 dn = getSample(uv, vec2(0.0, -pixelSize.y));
+#else
+					vec4 up = texture2D(InputTexture, uv + vec2(0.0, +pixelSize.y));
+					vec4 dn = texture2D(InputTexture, uv + vec2(0.0, -pixelSize.y));
+#endif
+					if (isRayHit(up.a) && isRayHit(dn.a)) {
+						data = (up + dn) * 0.5;
+					}
+				}
+
+				fragOutput.Color0 = data;
+			}
+		}
+	}
+
+	Pass "SSRGetReflectedColor"
+	{
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+		[Option] FragmentOutput: Color0
+
+		Shader : Custom
+		{
+			// Calculates the average luminance values and variance around a pixel using Wedford's online algorithm
+			// https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
+			void calculatePixelStatistics(vec2 uv, inout vec4 average, inout vec4 variance) {
+				int statisticRadius = int(StatisticRadius);
+
+				average = vec4_splat(0.0f);
+				variance = vec4_splat(0.0f);
+				float count = 0.0f;
+
+				for(int i = -statisticRadius; i <= statisticRadius; i++) {
+					for(int j = -statisticRadius; j <= statisticRadius; j++) {
+						vec2 sampleUV = uv + vec2(i, j) * ScreenSize.zw;
+						vec4 hitPoint = texture2D(InputTexture, sampleUV);
+						vec4 sampleColor = vec4_splat(0.0f);
+
+						if(isRayHit(hitPoint.a)) {
+							float depth = texture2D(GbufferDepth, hitPoint.xy).r;
+							vec2 hitUV = getPreviousUV(depth, hitPoint.xy, InvView, InvProj, PrevViewProj);
+							sampleColor = vec4(texture2D(RasterColor, hitUV).rgb, hitPoint.a);
+						}
+
+						count = count + 1;
+						vec4 oldMean = average;
+						average += ((sampleColor - oldMean) / count);
+						variance += ((sampleColor - oldMean) * (sampleColor - average));
+					}
+				}
+
+				variance = variance / (count - 1);
+			}
+
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput)
+			{
+				// Packaged Data: (uv2, depth, confidence/fading value).
+				vec4 hitPoint = texture2D(InputTexture, fragInput.texcoord0.xy);
+				float depth = texture2D(GbufferDepth, hitPoint.xy).r;
+				vec2 uv = getPreviousUV(depth, hitPoint.xy, InvView, InvProj, PrevViewProj);
+
+				vec4 currentColor = vec4_splat(0.0); // (rgba)
+				
+				// Color information.
+				// Sample the frame buffer to retrieve the pixel color associated to the input uv
+				if(isRayHit(hitPoint.a)) {
+					currentColor = vec4(texture2D(RasterColor, uv).rgb, hitPoint.a);
+				}
+
+				// Color information.
+				vec4 reprojectedColor = currentColor;
+
+				if(TemporalAccumulationEnabled > 0) {
+					vec4 meanRadiance;
+					vec4 radianceVariance;
+					float hitDepth = hitPoint.z;
+					vec2 previousBufferUV = getPreviousUV(hitDepth, fragInput.texcoord0.xy, InvView, InvProj, PrevViewProj);
+
+					// Calculates the statistics for the current pixel
+					calculatePixelStatistics(fragInput.texcoord0.xy, meanRadiance, radianceVariance);
+
+					vec4 previousColor = texture2D(PreviousReflectionBuffer, previousBufferUV * ViewportScale.zw).rgba;
+					vec4 stdDev = sqrt(max(vec4_splat(0.0f), radianceVariance));
+					vec4 maxColor = meanRadiance + AllowedStandardDeviationDifference * stdDev;
+					vec4 minColor = meanRadiance - AllowedStandardDeviationDifference * stdDev;
+					reprojectedColor = clamp(previousColor, minColor, maxColor);
+				}
+
+				vec4 accumulatedColor = mix(reprojectedColor, currentColor, CurrentColorContribution);
+				fragOutput.Color0 = accumulatedColor;
+			}
+		}
+	}
+}

@@ -1,0 +1,52 @@
+/********************************************************
+*  (c) Mojang.    All rights reserved.                  *
+*  (c) Microsoft. All rights reserved.                  *
+*********************************************************/
+
+MaterialDefinition "RTXPostFX.ToneMapping" : "RTXPostFX"
+{
+	Properties
+	{
+		[Sampler:2D] gToneCurve
+		[Sampler:2D] gRasterizedInput
+		[Sampler:2D] gBloomBuffer
+		[Float] gToneMappingIntensity : 1.0
+		[Float] gColorGradingEnabled : 1.0
+		[Vector] gToneMappingColorBalance: (1, 1, 1, 1)
+		[Float] gPerformSRGBConversion : 1.0
+		[Float] gToneMappingContrast : 1.0 // Currently inaccessible
+		[Float] gToneMappingSaturation : 1.0 // Currently inaccessible
+		[Float] gToneMappingGamma : 1.0 // Currently inaccessible
+		[Float] gToneMappingShadowContrast : 0.0
+		[Float] gToneMappingShadowContrastEnd : 0.0
+		[Float] gToneMappingFilmicSaturationCorrection : 1.0
+		[Float] gToneMappingDebugMode : 0.0
+		[Float] gBloomMultiplier : 1
+	}
+
+	Pass "ToneMapping"
+	{
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+
+		Shader : Custom
+		{
+			#if BGFX_SHADER_LANGUAGE_HLSL > 2
+			#include "RTXPostFX.Tonemapping.dragonh"
+			
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				ToneMappingPSOutStruct ToneMappingPSOut = applyToneMapping(fragInput);
+				fragOutput.Color0 = ToneMappingPSOut.OutColor;
+			}
+
+			#else
+
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				fragOutput.Color0 = texture2D(RasterColor, fragInput.texcoord0);
+			}
+
+			#endif
+
+		}
+	}
+}

@@ -1,0 +1,98 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+#pragma once
+
+#define TemperatureGradingEnabled (ColorGrading_Temperature_Params.x != 0.0f)
+#define TemperatureGradingTemp ColorGrading_Temperature_Params.y
+#define TemperatureGradingType int(ColorGrading_Temperature_Params.z)
+
+#define ContrastHighlights ColorGrading_Contrast_Highlights.xyz
+#define ContrastHighlightsEnabled (ColorGrading_Contrast_Highlights.w != 0.0f)
+#define ContrastMidtones ColorGrading_Contrast_Midtones.xyz
+#define ContrastMidtonesEnabled (ColorGrading_Contrast_Midtones.w != 0.0f)
+#define ContrastShadows ColorGrading_Contrast_Shadows.xyz
+#define ContrastShadowsEnabled (ColorGrading_Contrast_Shadows.w != 0.0f)
+
+#define SaturationHighlights ColorGrading_Saturation_Highlights.xyz 
+#define SaturationHighlightsEnabled (ColorGrading_Saturation_Highlights.w != 0.0f)
+#define SaturationMidtones ColorGrading_Saturation_Midtones.xyz 
+#define SaturationMidtonesEnabled (ColorGrading_Saturation_Midtones.w != 0.0f)
+#define SaturationShadows ColorGrading_Saturation_Shadows.xyz
+#define SaturationShadowsEnabled (ColorGrading_Saturation_Shadows.w != 0.0f)
+
+#define GainHighlights ColorGrading_Gain_Highlights.xyz
+#define GainHighlightsEnabled (ColorGrading_Gain_Highlights.w != 0.0f)
+#define GainMidtones ColorGrading_Gain_Midtones.xyz 
+#define GainMidtonesEnabled (ColorGrading_Gain_Midtones.w != 0.0f)
+#define GainShadows ColorGrading_Gain_Shadows.xyz
+#define GainShadowsEnabled (ColorGrading_Gain_Shadows.w != 0.0f)
+
+#define OffsetHighlights ColorGrading_Offset_Highlights.xyz 
+#define OffsetHighlightsEnabled (ColorGrading_Offset_Highlights.w != 0.0f)
+#define OffsetMidtones ColorGrading_Offset_Midtones.xyz 
+#define OffsetMidtonesEnabled (ColorGrading_Offset_Midtones.w != 0.0f)
+#define OffsetShadows ColorGrading_Offset_Shadows.xyz
+#define OffsetShadowsEnabled (ColorGrading_Offset_Shadows.w != 0.0f)
+
+#define GammaHighlights ColorGrading_Gamma_Highlights.xyz
+#define GammaHighlightsEnabled (ColorGrading_Gamma_Highlights.w != 0.0f)
+#define GammaMidtones ColorGrading_Gamma_Midtones.xyz 
+#define GammaMidtonesEnabled (ColorGrading_Gamma_Midtones.w != 0.0f)
+#define GammaShadows ColorGrading_Gamma_Shadows.xyz
+#define GammaShadowsEnabled (ColorGrading_Gamma_Shadows.w != 0.0f)
+
+#define ContrastPivot ColorGrading_Misc.x
+#define HighlightsMin ColorGrading_Misc.y
+#define ShadowsMax ColorGrading_Misc.z
+#define PlayerUIGamma ColorGrading_Misc.w
+
+#define ColorGrading_OptimizeGammaCorrectionEnabled bool(ColorGrading_Misc2.x)
+
+vec3 getGradingVector(
+	vec3 highlightVector,
+	vec3 shadowVector,
+	vec3 midtoneVector,
+	float averageLuminance,
+	float colorLuminance,
+	float identity,
+	bool highlightGradingEnabled,
+	bool midtoneGradingEnabled,
+	bool shadowGradingEnabled) {
+
+	// If none of the below conditions are met, return a color that will not cause any changes
+	vec3 outVector = vec3_splat(identity);
+
+	// If highlight split tones are enabled and the colorLuminance is greater than the highlight minimum luminance
+	// Then the pixel has the highlight grading vector applied
+	if(highlightGradingEnabled && colorLuminance >= averageLuminance * HighlightsMin) {
+		outVector = highlightVector;
+
+	// If shadow split tones are enabled and the colorLuminance is less than than the shadow maximum luminance
+	// Then the pixel has the shadow grading vector applied
+	} else if(shadowGradingEnabled && colorLuminance <= averageLuminance * ShadowsMax) {
+		outVector = shadowVector;
+
+	// If the colorLuminance is between the shadow max and the highlight min
+	// Then we will use a mixture of the the midtone vector and the highlight or shadow vector
+	} else if(midtoneGradingEnabled) {
+
+		// If the colorLuminance is between the shadow maximum and the averageLuminance
+		// Then we will mix the shadow and midtone vectors based on the colorLuminance's position in the range (averageLuminance * ShadowsMax, averageLuminance)
+		if(colorLuminance < averageLuminance && shadowGradingEnabled) {
+			float mixAmount = (colorLuminance - (averageLuminance * ShadowsMax)) / (averageLuminance - (averageLuminance * ShadowsMax));
+			outVector = mix(shadowVector, midtoneVector, mixAmount);
+
+		// If the colorLuminance is between the averageLuminance and the highlight minimum
+		// Then we will mix the midtone and highlight vectors based on the colorLuminance's position in the range (averageLuminance, averageLuminance * HighlightsMin)
+		} else if (colorLuminance > averageLuminance && highlightGradingEnabled) {
+			float mixAmount = (colorLuminance - averageLuminance) / ((averageLuminance * HighlightsMin) - averageLuminance);
+			outVector = mix(midtoneVector, highlightVector, mixAmount);
+
+		} else {
+			outVector = midtoneVector;
+		}
+	}
+
+	return outVector;
+}

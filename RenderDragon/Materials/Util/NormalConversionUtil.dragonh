@@ -1,0 +1,44 @@
+// Copyright (c) Microsoft Corporation. All rights reserved.
+
+#pragma once
+
+// Helper function to reflect the folds of the lower hemisphere
+// over the diagonals in the octahedral map.
+vec2 octWrap(vec2 v) {
+	return (1.0 - abs(v.yx)) * ((2.0 * step(0.0, v)) - 1.0);
+}
+
+// Converts normalized direction to the octahedral map (non-equal area, signed normalized).
+// \param[in] n Normalized direction.
+// \return Position in octahedral map in [-1,1] for each component.
+vec2 ndirToOctSnorm(vec3 n) {
+	// Project the sphere onto the octahedron (|x|+|y|+|z| = 1) and then onto the xy-plane.
+	vec2 p = n.xy * (1.0 / (abs(n.x) + abs(n.y) + abs(n.z)));
+	p = (n.z < 0.0) ? octWrap(p) : p;
+	return p;
+}
+
+// Converts normalized direction to the octahedral map (non-equal area, signed normalized).
+// \param[in] n Normalized direction.
+// \return Position in octahedral map in [0,1] for each component.
+vec2 ndirToOctUnorm(vec3 n) {
+	vec2 p = ndirToOctSnorm(n);
+	return p * 0.5f + 0.5f;
+}
+
+// Converts point in the octahedral map to normalized direction (non-equal area, signed normalized).
+// \param[in] p Position in octahedral map in [-1,1] for each component.
+// \return Normalized direction.
+vec3 octToNdirSnorm(vec2 p) {
+	vec3 n = vec3(p.xy, 1.0 - abs(p.x) - abs(p.y));
+	n.xy = (n.z < 0.0) ? octWrap(n.xy) : n.xy;
+	return normalize(n);
+}
+
+// Converts point in the octahedral map to normalized direction (non-equal area, signed normalized).
+// \param[in] p Position in octahedral map in [0,1] for each component.
+// \return Normalized direction.
+vec3 octToNdirUnorm(vec2 p) {
+	vec2 pSnorm = p * 2.0f - 1.0f;
+	return octToNdirSnorm(pSnorm);
+}

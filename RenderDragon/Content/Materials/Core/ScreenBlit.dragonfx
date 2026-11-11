@@ -1,0 +1,69 @@
+/********************************************************
+*  (c) Mojang.    All rights reserved.                  *
+*  (c) Microsoft. All rights reserved.                  *
+*********************************************************/
+
+MaterialDefinition "Core/Screen/Blit"
+{
+	Properties
+	{
+		[Sampler:2D] MatTexture
+		[Vector] ViewportScale : (1, 1, 0, 0)
+	}
+
+	Pass "Blit"
+	{
+		[VertexInput:vec3] position : POSITION
+		[VertexInput:vec2] texcoord0 : TEXCOORD0
+
+		[FragmentInput:vec2] texcoord0 : TEXCOORD0
+
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+
+		Shader : Custom
+		{
+			void Vert(VertexInput vertInput, inout VertexOutput vertOutput) {
+				vertOutput.position = vec4(vertInput.position, 1.0);
+				vertOutput.position.xy = vertOutput.position.xy * 2.0 - 1.0;
+
+				vertOutput.texcoord0 = vertInput.texcoord0;
+			}
+
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				fragOutput.Color0 = texture2D(MatTexture, fragInput.texcoord0);
+			}
+		}
+	}
+
+	Pass "BlitUncompressed"
+	{
+		[VertexInput:vec3] position : POSITION
+		[VertexInput:vec2] texcoord0 : TEXCOORD0
+
+		[FragmentInput:vec2] texcoord0 : TEXCOORD0
+
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+
+		Shader : Custom
+		{
+			
+			void Vert(VertexInput vertInput, inout VertexOutput vertOutput) {
+				vertOutput.position = vec4(vertInput.position, 1.0);
+				vertOutput.position.xy = vertOutput.position.xy * 2.0 - 1.0;
+
+				vertOutput.texcoord0 = vertInput.texcoord0;
+			}
+
+			#if BGFX_SHADER_LANGUAGE_PSSL
+				// PSSL automatically compresses fragment output to FMT_16 unless the shader specifies otherwise
+				#pragma PSSL_target_output_format(default FMT_32_ABGR)
+			#endif
+
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				fragOutput.Color0 = texture2D(MatTexture, fragInput.texcoord0);
+			}
+		}
+	}
+}

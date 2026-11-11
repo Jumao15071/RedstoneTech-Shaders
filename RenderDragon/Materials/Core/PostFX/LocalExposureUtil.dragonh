@@ -1,0 +1,12 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+#define BilateralGridMinLogLuminance LuminanceRangeParams.x
+#define BilateralGridMaxLogLuminance LuminanceRangeParams.y
+#define BilateralGridMinLinearLuminance LuminanceRangeParams.z
+#define BilateralGridMaxLinearLuminance LuminanceRangeParams.w
+
+// Converts from linear to log luminance, clamping the value to a safe range first to avoid NaNs.
+float clampedLogLuminance(float luminance) {
+	return log2(clamp(luminance, BilateralGridMinLinearLuminance, BilateralGridMaxLinearLuminance));
+}

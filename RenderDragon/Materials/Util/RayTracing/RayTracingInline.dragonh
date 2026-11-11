@@ -1,0 +1,31 @@
+// Copyright (c) Microsoft Corporation. All rights reserved.
+
+#include "Util/RayTracing/RayTracingUtil.dragonh"
+
+#define SHADOW_EPSILON 0.01
+
+bool TraceRay(in RaytracingAccelerationStructure accelerationStructure,
+			  in int rayFlags,
+			  in int instanceInclusionMask,
+			  in vec3 origin, 
+			  in vec3 direction, 
+			  in float tMin, 
+			  in float tMax)
+{
+	rayQueryKHR rayQuery;
+	rayQueryInitializeKHR(rayQuery, accelerationStructure, RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | rayFlags, instanceInclusionMask, origin, tMin, direction, tMax);
+	
+	while(rayQueryProceedKHR(rayQuery)) {
+		rayQueryConfirmIntersectionKHR(rayQuery);
+	}
+
+	if (rayQueryGetIntersectionTypeKHR(rayQuery, true) == gl_RayQueryCommittedIntersectionTriangleKHR) {
+		float dist = rayQueryGetIntersectionTKHR(rayQuery, true);
+		vec3 hitPos = rayQueryGetWorldRayOriginKHR(rayQuery) + rayQueryGetWorldRayDirectionKHR(rayQuery) * dist;
+		if(distance(hitPos, dist) > SHADOW_EPSILON) {
+			return true;
+		}
+	}
+	
+	return false;
+}

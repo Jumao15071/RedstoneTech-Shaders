@@ -1,0 +1,71 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+MaterialDefinition "ClearVolume"
+{
+	Properties 
+	{
+		[WTexture:2DArray:rgba16f] Volume
+		[Vector] VolumeDimensions
+		[Vector] ClearValue
+	}
+
+	Pass "Clear"
+	{
+		[Flag] ThreadLimit : LimitedAt128, LimitedAt256, Native
+
+		[Option] KernelFunction : Clear
+		[Option] Threads : "THREADS_X, THREADS_Y, THREADS_Z"
+		[Option] GraphicsProfile : HiDef
+		[Option] Fallback : Fallback
+
+		Shader : Compute
+		{
+		#if flag(ThreadLimit, LimitedAt128)
+			#define THREADS_X 8
+			#define THREADS_Y 8
+			#define THREADS_Z 2
+		#elif flag(ThreadLimit, LimitedAt256)
+			#define THREADS_X 8
+			#define THREADS_Y 8
+			#define THREADS_Z 4
+		#else
+			#define THREADS_X 8
+			#define THREADS_Y 8
+			#define THREADS_Z 8
+		#endif
+
+			void Clear() {
+				int volumeWidth = int(VolumeDimensions.x);
+				int volumeHeight = int(VolumeDimensions.y);
+				int volumeDepth = int(VolumeDimensions.z);
+
+				int x = int(GlobalInvocationID.x);
+				int y = int(GlobalInvocationID.y);
+				int z = int(GlobalInvocationID.z);
+
+				// We round the number of threads up to the nearest multiple of thread group size, so threads that are outside the volume bounds should early-out
+				if (x >= volumeWidth || y >= volumeHeight || z >= volumeDepth) {
+					return;
+				}
+
+				imageStore(Volume, ivec3(x, y, z), ClearValue);
+			}
+		}
+	}
+
+	Pass "Fallback"
+	{
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+
+		Shader: Custom{
+			void Vert(VertexInput vertInput, inout VertexOutput vertOutput) {
+			}
+
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				fragOutput.Color0 = vec4(0.0, 0.0, 0.0, 0.0);
+			}
+		}
+	}
+}

@@ -1,0 +1,115 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+#pragma once
+
+/**
+  This file provides helper functions for calculating BRDFs, supporting BRDF
+  terms (D, G, F parameters) as well as diffuse reflectance approximations.
+
+  The implementation of these functions is meant to match literature that
+  one is likely to encounter on the subject. Useful papers to read for an
+  in-depth understanding of the topic include:
+  - "Physically Based Shading at Disney" by Brent Burley: https://media.disneyanimation.com/uploads/production/publication_asset/48/asset/s2012_pbs_disney_brdf_notes_v3.pdf
+  - "Real Shading in Unreal Engine 4" by Brian Karis: https://cdn2.unrealengine.com/Resources/files/2013SiggraphPresentationsNotes-26915738.pdf
+*/
+
+#define BRDF_FIX 1e-4	///< Epsilon value for making sure that BRDF-related functions don't divide by 0.
+
+/**
+  \brief Normal Distribution function: Trowbridge-Reitz/GGX.
+
+  This function calculates the Normal Distribution term for use in the Cook/
+  Torrance BRDF by using the Trowbridge-Reitz/GGX approximation. This term,
+  also referred to as the specular distribution, describes the distribution
+  of microfacet orientations on a surface.
+
+  \param N surface normal vector.
+  \param H halfway vector, between the light and view vectors.
+  \param a "alpha" value defined as (surface linear roughness)^2; specific to the UE4 implementation.
+  \return The surface's distribution of microfacets.
+*/
+float D_GGX_TrowbridgeReitz(vec3 N, vec3 H, float a) {
+	float a2 =  a * a;
+	float nDotH = max(dot(N, H), 0.0);
+	float f = (a2 - 1.0) * nDotH * nDotH + 1.0;
+
+	return a2 / (f * f * M_PI);
+}
+
+/**
+  \brief Geometric Attenuation function: Smith.
+
+  This function calculates the Geometric Attenuation term for use in the Cook/
+  Torrance BRDF by using the Smith approximation. This term, also referred to
+  as the self-shadowing term, approximates the surface area where the self-shadowing
+  occurs due to microfacets.
+
+  Smith functions break the calculation of attenuation into two components, one
+  based on light and one based on view. This particular implementation uses the
+  Schlick-GGX variation found in the UE4 engine.
+  
+  \param nDotL pre-computed n * l in view space.
+  \param nDotV pre-computed n * v in view space.
+  \param a "alpha" value defined as (surface linear roughness)^2; specific to the UE4 implementation.
+  \return The surface's shadowing factor due to microfacets.
+*/
+float G_Smith(float nDotL, float nDotV, float a) {
+	float k = a / 2.0;
+	float viewTerm = nDotV / (nDotV * (1.0 - k) + k + BRDF_FIX);
+	float lightTerm = nDotL / (nDotL * (1.0 - k) + k + BRDF_FIX);
+
+	return viewTerm * lightTerm;
+}
+
+/**
+  \brief Fresnel function: Schlick.
+
+  This function calculates the Fresnel term for use in the Cook/Torrance BRDF
+  by using the Schlick approximation. This approximation represents the contribution
+  of the Fresnel factor in the specular reflection of light for the surface.
+
+  \param V direction to the camera in view space.
+  \param H halfway vector, between the light and view vectors.
+  \param R0 the reflection coefficient for incoming light parallel to the normal, aka point of minimal reflection.
+  \return The surface's Fresnel factor.
+*/
+vec3 F_Schlick(vec3 V, vec3 H, vec3 R0) {
+	float vDotH = max(dot(V, H), 0.0);
+
+	return R0 + (1.0 - R0) * pow5(saturate(1.0 - vDotH));
+}
+
+/**
+  \brief Specular Bidirectional Reflectance Distribution Function: Cook/Torrance.
+
+  This function provides the BRDF implementation described in the Burley et. al.
+  paper from Disney on Physically Based Shading. It allows approximation of the
+  specular reflectance of a surface based on 3 terms that describe the microfacet
+  characteristics of the surface. This BRDF is particularly convenient in that
+  different methods for producing each term can be mixed-and-matched.
+
+  \param nDotL pre-computed n * l in view space.
+  \param nDotV pre-computed n * v in view space.
+  \param D the normal distribution term.
+  \param G the geometric attenuation term.
+  \param F the Fresnel term.
+  \return The surface's specular reflectance value.
+*/
+vec3 BRDF_Spec_CookTorrance(float nDotL, float nDotV, float D, float G, vec3 F) {
+	return (F * D * G) / (4.0 * nDotL * nDotV + BRDF_FIX);
+}
+
+/**
+  \brief Diffuse Bidirectional Reflectance Distribution Function: Lambertian.
+
+  This function provides a BRDF implementation for a Lambertian surface.
+  Such a lambertian surface describes a perfect diffuse surface that scatters
+  radiance equally in all directions.
+
+  \param albedo the surface's reflectance value.
+  \return The surface's diffuse reflectance value.
+*/
+vec3 BRDF_Diff_Lambertian(vec3 albedo) {
+	return albedo / M_PI;
+}

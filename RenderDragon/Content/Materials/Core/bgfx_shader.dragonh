@@ -1,0 +1,1195 @@
+/*
+ * Copyright 2011-2018 Branimir Karadzic. All rights reserved.
+ * License: https://github.com/bkaradzic/bgfx#license-bsd-2-clause
+ */
+
+#ifndef BGFX_SHADER_H_HEADER_GUARD
+#define BGFX_SHADER_H_HEADER_GUARD
+
+#if !defined(BGFX_CONFIG_MAX_BONES)
+#	define BGFX_CONFIG_MAX_BONES 4
+#endif // !defined(BGFX_CONFIG_MAX_BONES)
+
+#ifndef __cplusplus
+
+#if BGFX_SHADER_LANGUAGE_HLSL
+#define NOOP 
+#else
+#define NOOP void
+#endif
+
+// GLSL is strict about the use of fragment shader intrinsics when compiling vertex
+// shaders (even if the code is not compiled)
+#if !BGFX_SHADER_TYPE_FRAGMENT && BGFX_SHADER_LANGUAGE_GLSL
+#define discard
+#define dFdx(x) x
+#define dFdy(x) x
+#endif
+
+struct NoopSampler
+{
+	int noop;
+};
+
+#if BGFX_SHADER_LANGUAGE_HLSL > 3
+#	define BRANCH [branch]
+#	define LOOP   [loop]
+#	define UNROLL [unroll]
+#else
+#	define BRANCH
+#	define LOOP
+#	define UNROLL
+#endif // BGFX_SHADER_LANGUAGE_HLSL > 3
+
+#if BGFX_SHADER_LANGUAGE_HLSL > 3 && BGFX_SHADER_TYPE_FRAGMENT
+#	define EARLY_DEPTH_STENCIL [earlydepthstencil]
+#else
+#	define EARLY_DEPTH_STENCIL
+#endif // BGFX_SHADER_LANGUAGE_HLSL > 3 && BGFX_SHADER_TYPE_FRAGMENT
+
+#if BGFX_SHADER_LANGUAGE_GLSL
+#   define ARRAY_BEGIN(_type, _name, _count) _type _name[_count] = _type[](
+#   define ARRAY_END() )
+#else
+#   define ARRAY_BEGIN(_type, _name, _count) _type _name[_count] = {
+#   define ARRAY_END() }
+#endif // BGFX_SHADER_LANGUAGE_GLSL
+
+#if BGFX_SHADER_LANGUAGE_HLSL || BGFX_SHADER_LANGUAGE_PSSL || BGFX_SHADER_LANGUAGE_SPIRV || BGFX_SHADER_LANGUAGE_METAL
+#	define BGFX_BUFFER_DEFINE 1
+#else
+#	define BGFX_BUFFER_DEFINE 0
+#endif
+
+#if BGFX_SHADER_LANGUAGE_HLSL || BGFX_SHADER_LANGUAGE_PSSL || BGFX_SHADER_LANGUAGE_SPIRV || BGFX_SHADER_LANGUAGE_METAL
+#	define CONST(_x) static const _x
+#	define dFdx(_x) ddx(_x)
+#	define dFdy(_y) ddy(-_y)
+#	define inversesqrt(_x) rsqrt(_x)
+#	define fract(_x) frac(_x)
+
+#	define bvec2 bool2
+#	define bvec3 bool3
+#	define bvec4 bool4
+
+#	if BGFX_SHADER_LANGUAGE_HLSL > 4 && BGFX_SHADER_LANGUAGE_HLSL < 6
+#		define REGISTER(_type, _reg) register(_type[_reg])
+#	else
+#		define REGISTER(_type, _reg) register(_type ## _reg)
+#	endif // BGFX_SHADER_LANGUAGE_HLSL
+
+#	if BGFX_SHADER_LANGUAGE_HLSL > 3 || BGFX_SHADER_LANGUAGE_PSSL || BGFX_SHADER_LANGUAGE_SPIRV || BGFX_SHADER_LANGUAGE_METAL
+#		if BGFX_SHADER_LANGUAGE_HLSL > 4 || BGFX_SHADER_LANGUAGE_PSSL || BGFX_SHADER_LANGUAGE_SPIRV
+#			define dFdxCoarse(_x) ddx_coarse(_x)
+#			define dFdxFine(_x)   ddx_fine(_x)
+#			define dFdyCoarse(_y) ddy_coarse(-_y)
+#			define dFdyFine(_y)   ddy_fine(-_y)
+#		endif // BGFX_SHADER_LANGUAGE_HLSL > 4
+
+#		if BGFX_SHADER_LANGUAGE_HLSL || BGFX_SHADER_LANGUAGE_SPIRV || BGFX_SHADER_LANGUAGE_METAL
+float intBitsToFloat(int   _x) { return asfloat(_x); }
+vec2  intBitsToFloat(uint2 _x) { return asfloat(_x); }
+vec3  intBitsToFloat(uint3 _x) { return asfloat(_x); }
+vec4  intBitsToFloat(uint4 _x) { return asfloat(_x); }
+#		endif // BGFX_SHADER_LANGUAGE_HLSL || BGFX_SHADER_LANGUAGE_SPIRV || BGFX_SHADER_LANGUAGE_METAL
+
+float uintBitsToFloat(uint  _x) { return asfloat(_x); }
+vec2  uintBitsToFloat(uint2 _x) { return asfloat(_x); }
+vec3  uintBitsToFloat(uint3 _x) { return asfloat(_x); }
+vec4  uintBitsToFloat(uint4 _x) { return asfloat(_x); }
+
+uint  floatBitsToUint(float _x) { return asuint(_x); }
+uvec2 floatBitsToUint(vec2  _x) { return asuint(_x); }
+uvec3 floatBitsToUint(vec3  _x) { return asuint(_x); }
+uvec4 floatBitsToUint(vec4  _x) { return asuint(_x); }
+
+int   floatBitsToInt(float _x) { return asint(_x); }
+ivec2 floatBitsToInt(vec2  _x) { return asint(_x); }
+ivec3 floatBitsToInt(vec3  _x) { return asint(_x); }
+ivec4 floatBitsToInt(vec4  _x) { return asint(_x); }
+
+// genIType bitfieldReverse(highp genIType value)
+int   bitfieldReverse(int   _v) { return asint(reversebits(asuint(_v))); }
+ivec2 bitfieldReverse(ivec2 _v) { return asint(reversebits(asuint(_v))); }
+ivec3 bitfieldReverse(ivec3 _v) { return asint(reversebits(asuint(_v))); }
+ivec4 bitfieldReverse(ivec4 _v) { return asint(reversebits(asuint(_v))); }
+
+// genUType bitfieldReverse(highp genUType value)
+uint  bitfieldReverse(uint  _v) { return reversebits(_v); }
+uvec2 bitfieldReverse(uvec2 _v) { return reversebits(_v); }
+uvec3 bitfieldReverse(uvec3 _v) { return reversebits(_v); }
+uvec4 bitfieldReverse(uvec4 _v) { return reversebits(_v); }
+
+// genIType bitfieldExtract(genIType value, int offset, int bits)
+int   bitfieldExtract(int   _v, int _o, int _bi) { uint _mask = (1u << _bi) - 1u; return (_v >> _o) & _mask; }
+ivec2 bitfieldExtract(ivec2 _v, int _o, int _bi) { uint _mask = (1u << _bi) - 1u; return (_v >> _o) & _mask; }
+ivec3 bitfieldExtract(ivec3 _v, int _o, int _bi) { uint _mask = (1u << _bi) - 1u; return (_v >> _o) & _mask; }
+ivec4 bitfieldExtract(ivec4 _v, int _o, int _bi) { uint _mask = (1u << _bi) - 1u; return (_v >> _o) & _mask; }
+
+// genUType bitfieldExtract(genUType value, int offset, int bits)
+uint  bitfieldExtract(uint  _v, int _o, int _bi) { uint _mask = (1u << _bi) - 1u; return (_v >> _o) & _mask; }
+uvec2 bitfieldExtract(uvec2 _v, int _o, int _bi) { uint _mask = (1u << _bi) - 1u; return (_v >> _o) & _mask; }
+uvec3 bitfieldExtract(uvec3 _v, int _o, int _bi) { uint _mask = (1u << _bi) - 1u; return (_v >> _o) & _mask; }
+uvec4 bitfieldExtract(uvec4 _v, int _o, int _bi) { uint _mask = (1u << _bi) - 1u; return (_v >> _o) & _mask; }
+
+// genIType bitfieldInsert(genIType base, genIType insert, int offset, int bits)
+int   bitfieldInsert(int   _ba, int   _i, int _o, int _bi) { uint _mask = ((1u << _bi) - 1u) << _o; return (_ba & (~_mask)) | ((_i << _o) & _mask); }
+ivec2 bitfieldInsert(ivec2 _ba, ivec2 _i, int _o, int _bi) { uint _mask = ((1u << _bi) - 1u) << _o; return (_ba & (~_mask)) | ((_i << _o) & _mask); }
+ivec3 bitfieldInsert(ivec3 _ba, ivec3 _i, int _o, int _bi) { uint _mask = ((1u << _bi) - 1u) << _o; return (_ba & (~_mask)) | ((_i << _o) & _mask); }
+ivec4 bitfieldInsert(ivec4 _ba, ivec4 _i, int _o, int _bi) { uint _mask = ((1u << _bi) - 1u) << _o; return (_ba & (~_mask)) | ((_i << _o) & _mask); }
+
+// genUType bitfieldInsert(genUType base, genUType insert, int offset, int bits)
+uint  bitfieldInsert(uint  _ba, uint  _i, int _o, int _bi) { uint _mask = ((1u << _bi) - 1u) << _o; return (_ba & (~_mask)) | ((_i << _o) & _mask); }
+uvec2 bitfieldInsert(uvec2 _ba, uvec2 _i, int _o, int _bi) { uint _mask = ((1u << _bi) - 1u) << _o; return (_ba & (~_mask)) | ((_i << _o) & _mask); }
+uvec3 bitfieldInsert(uvec3 _ba, uvec3 _i, int _o, int _bi) { uint _mask = ((1u << _bi) - 1u) << _o; return (_ba & (~_mask)) | ((_i << _o) & _mask); }
+uvec4 bitfieldInsert(uvec4 _ba, uvec4 _i, int _o, int _bi) { uint _mask = ((1u << _bi) - 1u) << _o; return (_ba & (~_mask)) | ((_i << _o) & _mask); }
+
+uint packHalf2x16(vec2 _x)
+{
+	return (f32tof16(_x.y)<<16) | f32tof16(_x.x);
+}
+
+vec2 unpackHalf2x16(uint _x)
+{
+	return vec2(f16tof32(_x & 0xffff), f16tof32(_x >> 16) );
+}
+
+struct BgfxSampler2D
+{
+	SamplerState m_sampler;
+	Texture2D m_texture;
+};
+
+struct BgfxISampler2D
+{
+	Texture2D<ivec4> m_texture;
+};
+
+struct BgfxUSampler2D
+{
+	Texture2D<uvec4> m_texture;
+};
+
+struct BgfxSampler2DArray
+{
+	SamplerState m_sampler;
+	Texture2DArray m_texture;
+};
+
+struct BgfxSampler2DShadow
+{
+	SamplerComparisonState m_sampler;
+	Texture2D m_texture;
+};
+
+struct BgfxSampler2DArrayShadow
+{
+	SamplerComparisonState m_sampler;
+	Texture2DArray m_texture;
+};
+
+struct BgfxSampler3D
+{
+	SamplerState m_sampler;
+	Texture3D m_texture;
+};
+
+struct BgfxISampler3D
+{
+	Texture3D<ivec4> m_texture;
+};
+
+struct BgfxUSampler3D
+{
+	Texture3D<uvec4> m_texture;
+};
+
+struct BgfxSamplerCube
+{
+	SamplerState m_sampler;
+	TextureCube m_texture;
+};
+
+struct BgfxSamplerCubeArray
+{
+	SamplerState m_sampler;
+	TextureCubeArray m_texture;
+};
+
+struct BgfxSampler2DMS
+{
+	Texture2DMS<vec4> m_texture;
+};
+
+struct BgfxSamplerState
+{
+	SamplerState m_samplerState;
+};
+
+struct BgfxSamplerComparisonState
+{
+	SamplerComparisonState m_samplerState;
+};
+
+vec4 bgfxTexture2D(BgfxSampler2D _sampler, vec2 _coord)
+{
+	return _sampler.m_texture.Sample(_sampler.m_sampler, _coord);
+}
+
+vec4 bgfxTexture2DLod(BgfxSampler2D _sampler, vec2 _coord, float _level)
+{
+	return _sampler.m_texture.SampleLevel(_sampler.m_sampler, _coord, _level);
+}
+
+vec4 bgfxTexture2DProj(BgfxSampler2D _sampler, vec3 _coord)
+{
+	vec2 coord = _coord.xy * rcp(_coord.z);
+	return _sampler.m_texture.Sample(_sampler.m_sampler, coord);
+}
+
+vec4 bgfxTexture2DProj(BgfxSampler2D _sampler, vec4 _coord)
+{
+	vec2 coord = _coord.xy * rcp(_coord.w);
+	return _sampler.m_texture.Sample(_sampler.m_sampler, coord);
+}
+
+vec4 bgfxTexture2DGrad(BgfxSampler2D _sampler, vec2 _coord, vec2 _dPdx, vec2 _dPdy)
+{
+	return _sampler.m_texture.SampleGrad(_sampler.m_sampler, _coord, _dPdx, _dPdy);
+}
+
+vec4 bgfxTexture2DArray(BgfxSampler2DArray _sampler, vec3 _coord)
+{
+	return _sampler.m_texture.Sample(_sampler.m_sampler, _coord);
+}
+
+vec4 bgfxTexture2DArrayLod(BgfxSampler2DArray _sampler, vec3 _coord, float _lod)
+{
+	return _sampler.m_texture.SampleLevel(_sampler.m_sampler, _coord, _lod);
+}
+
+float bgfxShadow2D(BgfxSampler2DShadow _sampler, vec3 _coord)
+{
+	return _sampler.m_texture.SampleCmpLevelZero(_sampler.m_sampler, _coord.xy, _coord.z);
+}
+
+vec4 bgfxShadow2DArray(BgfxSampler2DArrayShadow _sampler, vec4 _coord)
+{
+	return _sampler.m_texture.SampleCmpLevelZero(_sampler.m_sampler, _coord.xyz, _coord.w);
+}
+
+float bgfxShadow2DProj(BgfxSampler2DShadow _sampler, vec4 _coord)
+{
+	vec3 coord = _coord.xyz * rcp(_coord.w);
+	return _sampler.m_texture.SampleCmpLevelZero(_sampler.m_sampler, coord.xy, coord.z);
+}
+
+vec4 bgfxTexture3D(BgfxSampler3D _sampler, vec3 _coord)
+{
+	return _sampler.m_texture.Sample(_sampler.m_sampler, _coord);
+}
+
+vec4 bgfxTexture3DLod(BgfxSampler3D _sampler, vec3 _coord, float _level)
+{
+	return _sampler.m_texture.SampleLevel(_sampler.m_sampler, _coord, _level);
+}
+
+ivec4 bgfxTexture3D(BgfxISampler3D _sampler, vec3 _coord)
+{
+	uvec3 size;
+	_sampler.m_texture.GetDimensions(size.x, size.y, size.z);
+	return _sampler.m_texture.Load(ivec4(_coord * size, 0) );
+}
+
+uvec4 bgfxTexture3D(BgfxUSampler3D _sampler, vec3 _coord)
+{
+	uvec3 size;
+	_sampler.m_texture.GetDimensions(size.x, size.y, size.z);
+	return _sampler.m_texture.Load(ivec4(_coord * size, 0) );
+}
+
+vec4 bgfxTextureCube(BgfxSamplerCube _sampler, vec3 _coord)
+{
+	return _sampler.m_texture.Sample(_sampler.m_sampler, _coord);
+}
+
+vec4 bgfxTextureCubeLod(BgfxSamplerCube _sampler, vec3 _coord, float _level)
+{
+	return _sampler.m_texture.SampleLevel(_sampler.m_sampler, _coord, _level);
+}
+
+vec4 bgfxTextureCubeArray(BgfxSamplerCubeArray _sampler, vec4 _coord)
+{
+	return _sampler.m_texture.Sample(_sampler.m_sampler, _coord);
+}
+
+vec4 bgfxTextureCubeArrayLod(BgfxSamplerCubeArray _sampler, vec4 _coord, float _level)
+{
+	return _sampler.m_texture.SampleLevel(_sampler.m_sampler, _coord, _level);
+}
+
+vec4 bgfxTexelFetch(BgfxSampler2D _sampler, ivec2 _coord, int _lod)
+{
+	return _sampler.m_texture.Load(ivec3(_coord, _lod) );
+}
+
+vec2 bgfxTextureSize(BgfxSampler2D _sampler, int _lod)
+{
+	vec2 result;
+	_sampler.m_texture.GetDimensions(result.x, result.y);
+	return result;
+}
+
+ivec4 bgfxTexelFetch(BgfxISampler2D _sampler, ivec2 _coord, int _lod)
+{
+	return _sampler.m_texture.Load(ivec3(_coord, _lod) );
+}
+
+uvec4 bgfxTexelFetch(BgfxUSampler2D _sampler, ivec2 _coord, int _lod)
+{
+	return _sampler.m_texture.Load(ivec3(_coord, _lod) );
+}
+
+vec4 bgfxTexelFetch(BgfxSampler2DMS _sampler, ivec2 _coord, int _sampleIdx)
+{
+	return _sampler.m_texture.Load(_coord, _sampleIdx);
+}
+
+vec4 bgfxTexelFetch(BgfxSampler3D _sampler, ivec3 _coord, int _lod)
+{
+	return _sampler.m_texture.Load(ivec4(_coord, _lod) );
+}
+
+vec3 bgfxTextureSize(BgfxSampler3D _sampler, int _lod)
+{
+	vec3 result;
+	_sampler.m_texture.GetDimensions(result.x, result.y, result.z);
+	return result;
+}
+
+vec4 bgfxTextureGather(BgfxSampler2D _sampler, vec2 _coord, int comp)
+{
+	if (comp == 0)
+	{
+		return _sampler.m_texture.GatherRed(_sampler.m_sampler, _coord);
+	}
+	else if (comp == 1)
+	{
+		return _sampler.m_texture.GatherGreen(_sampler.m_sampler, _coord);
+	}
+	else if (comp == 2)
+	{
+		return _sampler.m_texture.GatherBlue(_sampler.m_sampler, _coord);
+	}
+	else if (comp == 3)
+	{
+		return _sampler.m_texture.GatherAlpha(_sampler.m_sampler, _coord);
+	}
+	return vec4(0, 0, 0, 0);
+}
+
+vec4 bgfxTextureGather(BgfxSampler2DArray _sampler, vec3 _coord, int comp)
+{
+	if (comp == 0)
+	{
+		return _sampler.m_texture.GatherRed(_sampler.m_sampler, _coord);
+	}
+	else if (comp == 1)
+	{
+		return _sampler.m_texture.GatherGreen(_sampler.m_sampler, _coord);
+	}
+	else if (comp == 2)
+	{
+		return _sampler.m_texture.GatherBlue(_sampler.m_sampler, _coord);
+	}
+	else if (comp == 3)
+	{
+		return _sampler.m_texture.GatherAlpha(_sampler.m_sampler, _coord);
+	}
+	return vec4(0, 0, 0, 0);
+}
+
+vec4 bgfxTextureGather(BgfxSamplerCube _sampler, vec3 _coord, int comp)
+{
+	if (comp == 0)
+	{
+		return _sampler.m_texture.GatherRed(_sampler.m_sampler, _coord);
+	}
+	else if (comp == 1)
+	{
+		return _sampler.m_texture.GatherGreen(_sampler.m_sampler, _coord);
+	}
+	else if (comp == 2)
+	{
+		return _sampler.m_texture.GatherBlue(_sampler.m_sampler, _coord);
+	}
+	else if (comp == 3)
+	{
+		return _sampler.m_texture.GatherAlpha(_sampler.m_sampler, _coord);
+	}
+	return vec4(0, 0, 0, 0);
+}
+
+vec4 bgfxTextureGather(BgfxSamplerCubeArray _sampler, vec4 _coord, int comp)
+{
+	if (comp == 0)
+	{
+		return _sampler.m_texture.GatherRed(_sampler.m_sampler, _coord);
+	}
+	else if (comp == 1)
+	{
+		return _sampler.m_texture.GatherGreen(_sampler.m_sampler, _coord);
+	}
+	else if (comp == 2)
+	{
+		return _sampler.m_texture.GatherBlue(_sampler.m_sampler, _coord);
+	}
+	else if (comp == 3)
+	{
+		return _sampler.m_texture.GatherAlpha(_sampler.m_sampler, _coord);
+	}
+	return vec4(0, 0, 0, 0);
+}
+
+#	define GET_SAMPLER_FUNCTION(_bgfxtype, _textureType, _samplerStateType) \
+	_bgfxtype getSampler(_textureType _texture, _samplerStateType _samplerState) \
+	{ \
+		_bgfxtype bgfxSampler; \
+		bgfxSampler.m_texture = _texture; \
+		bgfxSampler.m_sampler = _samplerState.m_samplerState; \
+		return bgfxSampler; \
+	}
+
+vec4 bgfxTexture2D(NoopSampler _sampler, vec2 _coord)                             { return vec4(0.0,0.0,0.0,0.0);}
+vec4 bgfxTexture2DLod(NoopSampler _sampler, vec2 _coord, float _level)            { return vec4(0.0,0.0,0.0,0.0);}
+vec4 bgfxTexture2DProj(NoopSampler _sampler, vec3 _coord)                         { return vec4(0.0,0.0,0.0,0.0);}
+vec4 bgfxTexture2DProj(NoopSampler _sampler, vec4 _coord)                         { return vec4(0.0,0.0,0.0,0.0);}
+vec4 bgfxTexture2DGrad(NoopSampler _sampler, vec2 _coord, vec2 _dPdx, vec2 _dPdy) { return vec4(0.0,0.0,0.0,0.0);}
+vec4 bgfxTexture2DArray(NoopSampler _sampler, vec3 _coord)                        { return vec4(0.0,0.0,0.0,0.0);}
+vec4 bgfxTexture2DArrayLod(NoopSampler _sampler, vec3 _coord, float _lod)         { return vec4(0.0,0.0,0.0,0.0);}
+float bgfxShadow2D(NoopSampler _sampler, vec3 _coord)                             { return 0.0;}
+float bgfxShadow2DProj(NoopSampler _sampler, vec4 _coord)                         { return 0.0;}
+vec4 bgfxTexture3D(NoopSampler _sampler, vec3 _coord)                             { return vec4(0.0,0.0,0.0,0.0);}
+vec4 bgfxTexture3DLod(NoopSampler _sampler, vec3 _coord, float _level)            { return vec4(0.0,0.0,0.0,0.0);}
+vec4 bgfxTextureCube(NoopSampler _sampler, vec3 _coord)                           { return vec4(0.0,0.0,0.0,0.0);}
+vec4 bgfxTextureCubeLod(NoopSampler _sampler, vec3 _coord, float _level)          { return vec4(0.0,0.0,0.0,0.0);}
+vec4 bgfxTextureCubeArray(NoopSampler _sampler, vec4 _coord)                      { return vec4(0.0,0.0,0.0,0.0);}
+vec4 bgfxTextureCubeArrayLod(NoopSampler _sampler, vec4 _coord, float _level)     { return vec4(0.0,0.0,0.0,0.0);}
+vec4 bgfxTexelFetch(NoopSampler _sampler, ivec2 _coord, int _lod)                 { return vec4(0.0,0.0,0.0,0.0);}
+vec2 bgfxTextureSize(NoopSampler _sampler, int _lod)                              { return vec2(0.0,0.0);}
+vec4 bgfxTextureGather(NoopSampler _sampler, vec2 _coord, int comp)               { return vec4(0.0,0.0,0.0,0.0);}
+NoopSampler getSampler(NoopSampler _sampler, BgfxSamplerState _samplerState)      { return _sampler;}
+NoopSampler getSampler(NoopSampler _sampler, NoopSampler _samplerState)           { return _sampler;}
+
+#		define SAMPLER2D(_name, _precision, _reg, _regsampler) \
+			uniform SamplerState _name ## Sampler : REGISTER(s, _regsampler); \
+			uniform Texture2D _name ## Texture : REGISTER(t, _reg); \
+			static BgfxSampler2D _name = { _name ## Sampler, _name ## Texture }
+#		define SAMPLER2D_INTRINSIC_SAMPLER_STATE(_name, _samplerState, _precision, _reg, _regsampler) \
+			uniform Texture2D _name ## Texture : REGISTER(t, _reg); \
+			static BgfxSampler2D _name = { _samplerState, _name ## Texture }
+#		define ISAMPLER2D(_name, _precision, _reg, _regsampler) \
+			uniform Texture2D<ivec4> _name ## Texture : REGISTER(t, _reg); \
+			static BgfxISampler2D _name = { _name ## Texture }
+#		define USAMPLER2D(_name, _precision, _reg, _regsampler) \
+			uniform Texture2D<uvec4> _name ## Texture : REGISTER(t, _reg); \
+			static BgfxUSampler2D _name = { _name ## Texture }
+#		define sampler2D BgfxSampler2D
+#		define texture2D(_sampler, _coord) bgfxTexture2D(_sampler, _coord)
+#		define texture2DLod(_sampler, _coord, _level) bgfxTexture2DLod(_sampler, _coord, _level)
+#		define texture2DProj(_sampler, _coord) bgfxTexture2DProj(_sampler, _coord)
+#		define texture2DGrad(_sampler, _coord, _dPdx, _dPdy) bgfxTexture2DGrad(_sampler, _coord, _dPdx, _dPdy)
+
+#		define SAMPLER2DARRAY(_name, _precision, _reg, _regsampler) \
+			uniform SamplerState _name ## Sampler : REGISTER(s, _regsampler); \
+			uniform Texture2DArray _name ## Texture : REGISTER(t, _reg); \
+			static BgfxSampler2DArray _name = { _name ## Sampler, _name ## Texture }
+#		define sampler2DArray BgfxSampler2DArray
+#		define texture2DArray(_sampler, _coord) bgfxTexture2DArray(_sampler, _coord)
+#		define texture2DArrayLod(_sampler, _coord, _lod) bgfxTexture2DArrayLod(_sampler, _coord, _lod)
+
+#		define SAMPLER2DMS(_name, _precision, _reg, _regsampler) \
+			uniform Texture2DMS<vec4> _name ## Texture : REGISTER(t, _reg); \
+			static BgfxSampler2DMS _name = { _name ## Texture }
+#		define sampler2DMS BgfxSampler2DMS
+
+#		define SAMPLER2DSHADOW(_name, _precision, _reg, _regsampler) \
+			uniform SamplerComparisonState _name ## SamplerComparison : REGISTER(s, _regsampler); \
+			uniform Texture2D _name ## Texture : REGISTER(t, _reg); \
+			static BgfxSampler2DShadow _name = { _name ## SamplerComparison, _name ## Texture }
+#		define sampler2DShadow BgfxSampler2DShadow
+#		define shadow2D(_sampler, _coord) bgfxShadow2D(_sampler, _coord)
+#		define shadow2DProj(_sampler, _coord) bgfxShadow2DProj(_sampler, _coord)
+
+#		define SAMPLER2DARRAYSHADOW(_name, _precision, _reg, _regsampler) \
+			uniform SamplerComparisonState _name ## SamplerComparison : REGISTER(s, _regsampler); \
+			uniform Texture2DArray _name ## Texture : REGISTER(t, _reg); \
+			static BgfxSampler2DArrayShadow _name = { _name ## SamplerComparison, _name ## Texture }
+#		define sampler2DArrayShadow BgfxSampler2DArrayShadow
+#		define shadow2DArray(_sampler, _coord) bgfxShadow2DArray(_sampler, _coord)
+
+#		define SAMPLER3D(_name, _precision, _reg, _regsampler) \
+			uniform SamplerState _name ## Sampler : REGISTER(s, _regsampler); \
+			uniform Texture3D _name ## Texture : REGISTER(t, _reg); \
+			static BgfxSampler3D _name = { _name ## Sampler, _name ## Texture }
+#		define ISAMPLER3D(_name, _reg, _regsampler) \
+			uniform Texture3D<ivec4> _name ## Texture : REGISTER(t, _reg); \
+			static BgfxISampler3D _name = { _name ## Texture }
+#		define USAMPLER3D(_name, _reg, _regsampler) \
+			uniform Texture3D<uvec4> _name ## Texture : REGISTER(t, _reg); \
+			static BgfxUSampler3D _name = { _name ## Texture }
+#		define sampler3D BgfxSampler3D
+#		define texture3D(_sampler, _coord) bgfxTexture3D(_sampler, _coord)
+#		define texture3DLod(_sampler, _coord, _level) bgfxTexture3DLod(_sampler, _coord, _level)
+
+#		define SAMPLERCUBE(_name, _precision, _reg, _regsampler) \
+			uniform SamplerState _name ## Sampler : REGISTER(s, _regsampler); \
+			uniform TextureCube _name ## Texture : REGISTER(t, _reg); \
+			static BgfxSamplerCube _name = { _name ## Sampler, _name ## Texture }
+#		define samplerCube BgfxSamplerCube
+#		define textureCube(_sampler, _coord) bgfxTextureCube(_sampler, _coord)
+#		define textureCubeLod(_sampler, _coord, _level) bgfxTextureCubeLod(_sampler, _coord, _level)
+
+#		define SAMPLERCUBEARRAY(_name, _precision, _reg, _regsampler) \
+			uniform SamplerState _name ## Sampler : REGISTER(s, _regsampler); \
+			uniform TextureCubeArray _name ## Texture : REGISTER(t, _reg); \
+			static BgfxSamplerCubeArray _name = { _name ## Sampler, _name ## Texture }
+#		define samplerCubeArray BgfxSamplerCubeArray
+#		define textureCubeArray(_sampler, _coord) bgfxTextureCubeArray(_sampler, _coord)
+#		define textureCubeArrayLod(_sampler, _coord, _level) bgfxTextureCubeArrayLod(_sampler, _coord, _level)
+
+// Separate SamplerStates
+#		define SAMPLER_STATE(_name, _reg) \
+			uniform SamplerState _name ## Sampler : REGISTER(s, _reg); \
+			static BgfxSamplerState _name = {_name ## Sampler}
+#		define SAMPLER_STATE_INTRINSIC(_name, _reg) \
+			uniform SamplerState _name ## Sampler : REGISTER(s, _reg)
+#		define SAMPLER_STATE_COMPARISON(_name, _reg) \
+			uniform SamplerComparisonState _name ## SamplerComparison : REGISTER(s, _regsampler); \
+			static BgfxSamplerComparisonState _name = {_name ## SamplerComparison}
+		GET_SAMPLER_FUNCTION(BgfxSampler2D, Texture2D, BgfxSamplerState)
+		GET_SAMPLER_FUNCTION(BgfxSampler2DShadow, Texture2D, BgfxSamplerComparisonState)
+		GET_SAMPLER_FUNCTION(BgfxSampler2DArrayShadow, Texture2DArray, BgfxSamplerComparisonState)
+		GET_SAMPLER_FUNCTION(BgfxSampler2DArray, Texture2DArray, BgfxSamplerState)
+		GET_SAMPLER_FUNCTION(BgfxSampler3D, Texture3D, BgfxSamplerState)
+		GET_SAMPLER_FUNCTION(BgfxSamplerCube, TextureCube, BgfxSamplerState)
+		GET_SAMPLER_FUNCTION(BgfxSamplerCubeArray, TextureCubeArray, BgfxSamplerState)
+
+// Textures without SamplerStates
+#		define TEXTURE2D(_name, _precision, _reg, _regsampler) \
+			uniform Texture2D _name : REGISTER(t, _reg)
+#		define ITEXTURE2D(_name, _precision, _reg, _regsampler) \
+			uniform Texture2D<ivec4> _name ## Texture : REGISTER(t, _reg); \
+			static BgfxISampler2D _name = { _name ## Texture }
+#		define UTEXTURE2D(_name, _precision, _reg, _regsampler) \
+			uniform Texture2D<uvec4> _name ## Texture : REGISTER(t, _reg); \
+			static BgfxUSampler2D _name = { _name ## Texture }
+
+#		define TEXTURE2DARRAY(_name, _precision, _reg, _regsampler) \
+			uniform Texture2DArray _name : REGISTER(t, _reg)
+
+#		define TEXTURE2DMS(_name, _precision, _reg, _regsampler) \
+			uniform Texture2DMS<vec4> _name ## Texture : REGISTER(t, _reg); \
+			static BgfxSampler2DMS _name = { _name ## Texture }
+
+#		define TEXTURE2DSHADOW(_name, _precision, _reg, _regsampler) \
+			uniform Texture2D _name : REGISTER(t, _reg)
+
+#		define TEXTURE2DARRAYSHADOW(_name, _precision, _reg, _regsampler) \
+			uniform Texture2DArray _name : REGISTER(t, _reg)
+
+#		define TEXTURE3D(_name, _precision, _reg, _regsampler) \
+			uniform Texture3D _name : REGISTER(t, _reg)
+#		define ITEXTURE3D(_name, _reg, _regsampler) \
+			uniform Texture3D<ivec4> _name ## Texture : REGISTER(t, _reg); \
+			static BgfxISampler3D _name = { _name ## Texture }
+#		define UTEXTURE3D(_name, _reg, _regsampler) \
+			uniform Texture3D<uvec4> _name ## Texture : REGISTER(t, _reg); \
+			static BgfxUSampler3D _name = { _name ## Texture }
+
+#		define TEXTURECUBE(_name, _precision, _reg, _regsampler) \
+			uniform TextureCube _name : REGISTER(t, _reg)
+
+#		if BGFX_SHADER_LANGUAGE_HLSL <= 4 
+#			define TEXTURECUBEARRAY(_name, _precision, _reg, _regsampler)      NoopSampler _name
+#		else
+#			define TEXTURECUBEARRAY(_name, _precision, _reg, _regsampler) \
+				uniform TextureCubeArray _name : REGISTER(t, _reg)
+#		endif //BGFX_SHADER_LANGUAGE_HLSL <= 4
+
+// Arrayed Textures
+#	if BGFX_SHADER_LANGUAGE_HLSL >= 51
+#		define TEXTURE2D_ARRAY(_name, _precision, _reg, _regsampler, _size) \
+			uniform Texture2D _name[_size] : REGISTER(t, _reg)
+
+#		define ITEXTURE2D_ARRAY(_name, _precision, _reg, _regsampler, _size) \
+			uniform Texture2D<ivec4> _name ## Texture[_size]  : REGISTER(t, _reg); \
+			static BgfxISampler2D _name[_size]  = { _name ## Texture }
+#		define UTEXTURE2D_ARRAY(_name, _precision, _reg, _regsampler, _size) \
+			uniform Texture2D<uvec4> _name ## Texture[_size]  : REGISTER(t, _reg); \
+			static BgfxUSampler2D _name[_size]  = { _name ## Texture }
+
+#		define TEXTURE2DARRAY_ARRAY(_name, _precision, _reg, _regsampler, _size) \
+			uniform Texture2DArray _name[_size] : REGISTER(t, _reg)
+
+#		define TEXTURE2DMS_ARRAY(_name, _precision, _reg, _regsampler, _size) \
+			uniform Texture2DMS<vec4> _name ## Texture[_size] : REGISTER(t, _reg); \
+			static BgfxSampler2DMS _name[_size] = { _name ## Texture }
+
+#		define TEXTURE2DSHADOW_ARRAY(_name, _precision, _reg, _regsampler, _size) \
+			uniform Texture2D _name[_size] : REGISTER(t, _reg)
+
+#		define TEXTURE2DARRAYSHADOW_ARRAY(_name, _precision, _reg, _regsampler, _size) \
+			uniform Texture2DArray _name[_size] : REGISTER(t, _reg)
+
+#		define TEXTURE3D_ARRAY(_name, _precision, _reg, _regsampler, _size) \
+			uniform Texture3D _name[_size] : REGISTER(t, _reg)
+#		define ITEXTURE3D_ARRAY(_name, _reg, _regsampler, _size) \
+			uniform Texture3D<ivec4> _name ## Texture[_size] : REGISTER(t, _reg); \
+			static BgfxISampler3D _name[_size] = { _name ## Texture }
+#		define UTEXTURE3D_ARRAY(_name, _reg, _regsampler, _size) \
+			uniform Texture3D<uvec4> _name ## Texture[_size] : REGISTER(t, _reg); \
+			static BgfxUSampler3D _name[_size] = { _name ## Texture }
+
+#		define TEXTURECUBE_ARRAY(_name, _precision, _reg, _regsampler, _size) \
+			uniform TextureCube _name[_size] : REGISTER(t, _reg)
+#		define TEXTURECUBEARRAY_ARRAY(_name, _precision, _reg, _regsampler, _size) \
+			uniform TextureCubeArray _name[_size] : REGISTER(t, _reg)
+
+#	else
+#		define TEXTURE2D_ARRAY(_name, _precision, _reg, _regsampler, _size)       static NoopSampler _name[_size]
+
+#		define ITEXTURE2D_ARRAY(_name, _precision, _reg, _regsampler, _size)      static NoopSampler _name[_size]
+#		define UTEXTURE2D_ARRAY(_name, _precision, _reg, _regsampler, _size)      static NoopSampler _name[_size]
+
+#		define TEXTURE2DARRAY_ARRAY(_name, _precision, _reg, _regsampler, _size)       static NoopSampler _name[_size]
+#		define TEXTURE2DMS_ARRAY(_name, _precision, _reg, _regsampler, _size)          static NoopSampler _name[_size]
+#		define TEXTURE2DSHADOW_ARRAY(_name, _precision, _reg, _regsampler, _size)      static NoopSampler _name[_size]
+#		define TEXTURE2DARRAYSHADOW_ARRAY(_name, _precision, _reg, _regsampler, _size) static NoopSampler _name[_size]
+
+#		define TEXTURE3D_ARRAY(_name, _precision, _reg, _regsampler, _size)       static NoopSampler _name[_size]
+#		define ITEXTURE3D_ARRAY(_name, _reg, _regsampler, _size)                  static NoopSampler _name[_size]
+#		define UTEXTURE3D_ARRAY(_name, _reg, _regsampler, _size)                  static NoopSampler _name[_size]
+
+#		define TEXTURECUBE_ARRAY(_name, _precision, _reg, _regsampler, _size)      static NoopSampler _name[_size]
+#		define TEXTURECUBEARRAY_ARRAY(_name, _precision, _reg, _regsampler, _size) static NoopSampler _name[_size]
+
+#	endif// BGFX_SHADER_LANGUAGE_HLSL >= 51
+
+#		define texelFetch(_sampler, _coord, _lod) bgfxTexelFetch(_sampler, _coord, _lod)
+#		define textureSize(_sampler, _lod) bgfxTextureSize(_sampler, _lod)
+#		define textureGather(_sampler, _lod, _comp) bgfxTextureGather(_sampler, _lod, _comp)
+
+#		define STRUCTUREDBUFFER(_bindingName, _name, _type, _reg) StructuredBuffer<_type> _bindingName : REGISTER(t, _reg)
+#		define RWSTRUCTUREDBUFFER(_bindingName, _name, _type, _reg) RWStructuredBuffer<_type> _bindingName : REGISTER(u, _reg)
+
+#	if BGFX_SHADER_LANGUAGE_HLSL >= 51
+#		define STRUCTUREDBUFFER_ARRAY(_bindingName, _name, _type, _reg, _size) StructuredBuffer<_type> _bindingName[_size] : REGISTER(t, _reg)
+#		define RWSTRUCTUREDBUFFER_ARRAY(_bindingName, _name, _type, _reg, _size) RWStructuredBuffer<_type> _bindingName[_size] : REGISTER(u, _reg)
+#	else 
+		// Used as a substitute for compilation of fallback shaders 
+#		define STRUCTUREDBUFFER_ARRAY(_bindingName, _name, _type, _reg, _size) static StructuredBuffer<_type> _bindingName[_size]
+#		define RWSTRUCTUREDBUFFER_ARRAY(_bindingName, _name, _type, _reg, _size) static RWStructuredBuffer<_type> _bindingName[_size]
+#	endif// BGFX_SHADER_LANGUAGE_HLSL >= 51
+
+#	else
+
+#		define sampler2DShadow sampler2D
+			
+
+vec4 bgfxTexture2DProj(sampler2D _sampler, vec3 _coord)
+{
+	return tex2Dproj(_sampler, vec4(_coord.xy, 0.0, _coord.z) );
+}
+
+vec4 bgfxTexture2DProj(sampler2D _sampler, vec4 _coord)
+{
+	return tex2Dproj(_sampler, _coord);
+}
+
+float bgfxShadow2D(sampler2DShadow _sampler, vec3 _coord)
+{
+#if 0
+	float occluder = tex2D(_sampler, _coord.xy).x;
+	return step(_coord.z, occluder);
+#else
+	return tex2Dproj(_sampler, vec4(_coord.xy, _coord.z, 1.0) ).x;
+#endif // 0
+}
+
+float bgfxShadow2DProj(sampler2DShadow _sampler, vec4 _coord)
+{
+#if 0
+	vec3 coord = _coord.xyz * rcp(_coord.w);
+	float occluder = tex2D(_sampler, coord.xy).x;
+	return step(coord.z, occluder);
+#else
+	return tex2Dproj(_sampler, _coord).x;
+#endif // 0
+}
+
+#		define SAMPLER2D(_name, _precision, _reg, _regsampler) uniform sampler2D _name : REGISTER(s, _reg)
+#		define SAMPLER2D_INTRINSIC_SAMPLER_STATE(_name, _samplerState, _precision, _reg, _regsampler) SAMPLER2D(_name, _precision, _reg, _regsampler)
+#		define SAMPLER2DMS(_name, _precision, _reg, _regsampler) uniform sampler2DMS _name : REGISTER(s, _reg)
+#		define texture2D(_sampler, _coord) tex2D(_sampler, _coord)
+#		define texture2DProj(_sampler, _coord) bgfxTexture2DProj(_sampler, _coord)
+
+#		define SAMPLER2DARRAY(_name, _precision, _reg, _regsampler) SAMPLER2D(_name, _precision, _reg, _regsampler)
+#		define texture2DArray(_sampler, _coord) texture2D(_sampler, (_coord).xy)
+#		define texture2DArrayLod(_sampler, _coord, _lod) texture2DLod(_sampler, _coord, _lod)
+
+#		define SAMPLER2DSHADOW(_name, _precision, _reg, _regsampler) uniform sampler2DShadow _name : REGISTER(s, _reg)
+#		define shadow2D(_sampler, _coord) bgfxShadow2D(_sampler, _coord)
+#		define shadow2DProj(_sampler, _coord) bgfxShadow2DProj(_sampler, _coord)
+
+#		define SAMPLER3D(_name, _precision, _reg, _regsampler) uniform sampler3D _name : REGISTER(s, _reg)
+#		define texture3D(_sampler, _coord) tex3D(_sampler, _coord)
+
+#		define SAMPLERCUBE(_name, _precision, _reg, _regsampler) uniform samplerCUBE _name : REGISTER(s, _reg)
+#		define textureCube(_sampler, _coord) texCUBE(_sampler, _coord)
+
+#		define SAMPLERCUBEARRAY(_name, _precision, _reg, _regsampler) SAMPLERCUBE(_name, _precision, _reg, _regsampler)
+#		define textureCubeArray(_sampler, _coord) textureCube(_sampler, (_coord).xyz)
+#		define textureCubeArrayLod(_sampler, _coord, _lod) textureCubeLod(_sampler, _coord, _lod)
+
+#		define TEXTURE2D(_name, _precision, _reg, _regsampler)             NoopSampler _name
+#		define TEXTURE2DARRAY(_name, _precision, _reg, _regsampler)        NoopSampler _name
+#		define TEXTURE2DMS(_name, _precision, _reg, _regsampler)           NoopSampler _name
+#		define TEXTURE2DSHADOW(_name, _precision, _reg, _regsampler)       NoopSampler _name
+#		define TEXTURE2DARRAYSHADOW(_name, _precision, _reg, _regsampler)  NoopSampler _name
+#		define TEXTURE3D(_name, _precision, _reg, _regsampler)             NoopSampler _name
+#		define TEXTURECUBE(_name, _precision, _reg, _regsampler)           NoopSampler _name
+#		define TEXTURECUBEARRAY(_name, _precision, _reg, _regsampler)      NoopSampler _name
+
+#		define TEXTURE2D_ARRAY(_name, _precision, _reg, _regsampler, _size)            NoopSampler _name[_size]
+#		define TEXTURE2DARRAY_ARRAY(_name, _precision, _reg, _regsampler, _size)       NoopSampler _name[_size]
+#		define TEXTURE2DMS_ARRAY(_name, _precision, _reg, _regsampler, _size)          NoopSampler _name[_size]
+#		define TEXTURE2DSHADOW_ARRAY(_name, _precision, _reg, _regsampler, _size)      NoopSampler _name[_size]
+#		define TEXTURE2DARRAYSHADOW_ARRAY(_name, _precision, _reg, _regsampler, _size) NoopSampler _name[_size]
+#		define TEXTURE3D_ARRAY(_name, _precision, _reg, _regsampler, _size)            NoopSampler _name[_size]
+#		define TEXTURECUBE_ARRAY(_name, _precision, _reg, _regsampler, _size)          NoopSampler _name[_size]
+#		define TEXTURECUBEARRAY_ARRAY(_name, _precision, _reg, _regsampler, _size)     NoopSampler _name[_size]
+
+#		if BGFX_SHADER_LANGUAGE_HLSL == 2
+#			define texture2DLod(_sampler, _coord, _level) tex2D(_sampler, (_coord).xy)
+#			define texture2DGrad(_sampler, _coord, _dPdx, _dPdy) tex2D(_sampler, _coord)
+#			define texture3DLod(_sampler, _coord, _level) tex3D(_sampler, (_coord).xyz)
+#			define textureCubeLod(_sampler, _coord, _level) texCUBE(_sampler, (_coord).xyz)
+#		else
+#			define texture2DLod(_sampler, _coord, _level) tex2Dlod(_sampler, vec4( (_coord).xy, 0.0, _level) )
+#			define texture2DGrad(_sampler, _coord, _dPdx, _dPdy) tex2Dgrad(_sampler, _coord, _dPdx, _dPdy)
+#			define texture3DLod(_sampler, _coord, _level) tex3Dlod(_sampler, vec4( (_coord).xyz, _level) )
+#			define textureCubeLod(_sampler, _coord, _level) texCUBElod(_sampler, vec4( (_coord).xyz, _level) )
+#		endif // BGFX_SHADER_LANGUAGE_HLSL == 2
+
+#		define STRUCTUREDBUFFER(_bindingName, _name, _type, _reg) StructuredBuffer<_type> _bindingName : REGISTER(t, _reg)
+#		define RWSTRUCTUREDBUFFER(_bindingName, _name, _type, _reg) RWStructuredBuffer<_type> _bindingName : REGISTER(u, _reg)
+
+		// Used as a substitute for compilation of fallback shaders 
+#		define STRUCTUREDBUFFER_ARRAY(_bindingName, _name, _type, _reg, _size) static StructuredBuffer<_type> _bindingName[_size]
+#		define RWSTRUCTUREDBUFFER_ARRAY(_bindingName, _name, _type, _reg, _size) static RWStructuredBuffer<_type> _bindingName[_size]
+
+#		define SAMPLER_STATE(_name, _reg) NoopSampler _name
+#		define SAMPLER_STATE_INTRINSIC(_name, _reg) NoopSampler _name
+
+#	endif // BGFX_SHADER_LANGUAGE_HLSL > 3
+
+vec3 instMul(vec3 _vec, mat3 _mtx) { return mul(_mtx, _vec); }
+vec3 instMul(mat3 _mtx, vec3 _vec) { return mul(_vec, _mtx); }
+vec4 instMul(vec4 _vec, mat4 _mtx) { return mul(_mtx, _vec); }
+vec4 instMul(mat4 _mtx, vec4 _vec) { return mul(_vec, _mtx); }
+
+bvec2 lessThan(vec2 _a, vec2 _b) { return _a < _b; }
+bvec3 lessThan(vec3 _a, vec3 _b) { return _a < _b; }
+bvec4 lessThan(vec4 _a, vec4 _b) { return _a < _b; }
+
+bvec2 lessThanEqual(vec2 _a, vec2 _b) { return _a <= _b; }
+bvec3 lessThanEqual(vec3 _a, vec3 _b) { return _a <= _b; }
+bvec4 lessThanEqual(vec4 _a, vec4 _b) { return _a <= _b; }
+
+bvec2 greaterThan(vec2 _a, vec2 _b) { return _a > _b; }
+bvec3 greaterThan(vec3 _a, vec3 _b) { return _a > _b; }
+bvec4 greaterThan(vec4 _a, vec4 _b) { return _a > _b; }
+
+bvec2 greaterThanEqual(vec2 _a, vec2 _b) { return _a >= _b; }
+bvec3 greaterThanEqual(vec3 _a, vec3 _b) { return _a >= _b; }
+bvec4 greaterThanEqual(vec4 _a, vec4 _b) { return _a >= _b; }
+
+bvec2 notEqual(vec2 _a, vec2 _b) { return _a != _b; }
+bvec3 notEqual(vec3 _a, vec3 _b) { return _a != _b; }
+bvec4 notEqual(vec4 _a, vec4 _b) { return _a != _b; }
+
+bvec2 equal(vec2 _a, vec2 _b) { return _a == _b; }
+bvec3 equal(vec3 _a, vec3 _b) { return _a == _b; }
+bvec4 equal(vec4 _a, vec4 _b) { return _a == _b; }
+
+bvec2 not(bvec2 _a) { return bvec2(!_a.x, !_a.y); }
+bvec3 not(bvec3 _a) { return bvec3(!_a.x, !_a.y, !_a.z); }
+bvec4 not(bvec4 _a) { return bvec4(!_a.x, !_a.y, !_a.z, !_a.w); }
+
+float mix(float _a, float _b, float _t) { return lerp(_a, _b, _t); }
+vec2  mix(vec2  _a, vec2  _b, vec2  _t) { return lerp(_a, _b, _t); }
+vec3  mix(vec3  _a, vec3  _b, vec3  _t) { return lerp(_a, _b, _t); }
+vec4  mix(vec4  _a, vec4  _b, vec4  _t) { return lerp(_a, _b, _t); }
+
+float mod(float _a, float _b) { return _a - _b * floor(_a / _b); }
+vec2  mod(vec2  _a, vec2  _b) { return _a - _b * floor(_a / _b); }
+vec3  mod(vec3  _a, vec3  _b) { return _a - _b * floor(_a / _b); }
+vec4  mod(vec4  _a, vec4  _b) { return _a - _b * floor(_a / _b); }
+
+#else // BGFX_SHADER_LANGUAGE_HLSL || BGFX_SHADER_LANGUAGE_PSSL || BGFX_SHADER_LANGUAGE_SPIRV
+#	define CONST(_x) const _x
+#	define atan2(_x, _y) atan(_x, _y)
+#	define mul(_a, _b) ( (_a) * (_b) )
+#	define saturate(_x) clamp(_x, 0.0, 1.0)
+#	define mad(_x, _y, _z) (mul(_x, _y) + _z)
+
+#	define PRECISION_HIGH 		highp
+#	define PRECISION_MEDIUM 	mediump
+#	define PRECISION_LOW 		lowp
+
+#	if (BGFX_SHADER_LANGUAGE_ESSL && BGFX_SHADER_LANGUAGE_ESSL <= 100)
+#	define uint int
+#	endif
+
+#	if BGFX_SHADER_LANGUAGE_ESSL > 100
+#		define SAMPLER2D(_name, _precision, _reg, _regsampler)       uniform _precision sampler2D _name
+#		define SAMPLER2D_INTRINSIC_SAMPLER_STATE(_name, _samplerState, _precision, _reg, _regsampler) SAMPLER2D(_name, _precision, _reg, _regsampler)
+#		define SAMPLER2DMS(_name, _precision, _reg, _regsampler)     uniform _precision sampler2DMS _name
+#		define SAMPLER3D(_name, _precision, _reg, _regsampler)       uniform _precision sampler3D _name
+#		define SAMPLERCUBE(_name, _precision, _reg, _regsampler)     uniform _precision samplerCube _name
+#		define SAMPLER2DSHADOW(_name, _precision, _reg, _regsampler) uniform _precision sampler2DShadow _name
+
+#		define SAMPLER2DARRAY(_name, _precision, _reg, _regsampler)       uniform _precision sampler2DArray _name
+#		define SAMPLER2DMSARRAY(_name, _precision, _reg, _regsampler)     uniform _precision sampler2DMSArray _name
+#		define SAMPLERCUBEARRAY(_name, _precision, _reg, _regsampler)     uniform _precision samplerCubeArray _name
+#		define SAMPLER2DARRAYSHADOW(_name, _precision, _reg, _regsampler) uniform _precision sampler2DArrayShadow _name
+#	else // BGFX_SHADER_LANGUAGE_ESSL > 100
+#		define SAMPLER2D(_name, _precision, _reg, _regsampler)       uniform _precision sampler2D _name
+#		define SAMPLER2D_INTRINSIC_SAMPLER_STATE(_name, _samplerState, _precision, _reg, _regsampler) SAMPLER2D(_name, _precision, _reg, _regsampler)
+#		define SAMPLER2DMS(_name, _precision, _reg, _regsampler)     uniform _precision sampler2DMS _name
+#		define SAMPLER3D(_name, _precision, _reg, _regsampler)       uniform _precision sampler3D _name
+#		define SAMPLERCUBE(_name, _precision, _reg, _regsampler)     uniform _precision samplerCube _name
+#		define SAMPLER2DSHADOW(_name, _precision, _reg, _regsampler) uniform _precision sampler2DShadow _name
+
+#		define SAMPLER2DARRAY(_name, _precision, _reg, _regsampler)       uniform _precision sampler2DArray _name
+#		define SAMPLER2DMSARRAY(_name, _precision, _reg, _regsampler)     uniform _precision sampler2DMSArray _name
+#		define SAMPLERCUBEARRAY(_name, _precision, _reg, _regsampler)     uniform _precision samplerCubeArray _name
+#		define SAMPLER2DARRAYSHADOW(_name, _precision, _reg, _regsampler) uniform _precision sampler2DArrayShadow _name
+#	endif
+
+#if BGFX_SHADER_LANGUAGE_ESSL > 0  && GL_FRAGMENT_PRECISION_HIGH
+#define DEFAULT_PRECISION highp
+#elif BGFX_SHADER_LANGUAGE_ESSL > 0 
+#define DEFAULT_PRECISION mediump
+#else
+#define DEFAULT_PRECISION 
+#endif
+
+vec4 textureSample(DEFAULT_PRECISION sampler2D _sampler, vec2 _coord)                  { return texture(_sampler, _coord);}
+vec4 textureSample(DEFAULT_PRECISION sampler3D _sampler, vec3 _coord)                  { return texture(_sampler, _coord);}
+vec4 textureSample(DEFAULT_PRECISION samplerCube _sampler, vec3 _coord)                { return texture(_sampler, _coord);}
+vec4 textureSample(DEFAULT_PRECISION sampler2D _sampler, vec2 _coord, float _lod)      { return textureLod(_sampler, _coord, _lod);}
+vec4 textureSample(DEFAULT_PRECISION sampler3D _sampler, vec3 _coord, float _lod)      { return textureLod(_sampler, _coord, _lod);}
+#	if BGFX_SHADER_LANGUAGE_ESSL > 100
+vec4 textureSample(DEFAULT_PRECISION sampler2DArray _sampler, vec3 _coord)               { return texture(_sampler, _coord);}
+vec4 textureSample(DEFAULT_PRECISION sampler2DArray _sampler, vec3 _coord, float _lod)   { return textureLod(_sampler, _coord, _lod);}
+#	elif BGFX_SHADER_LANGUAGE_ESSL == 100
+vec4 texture2D(NoopSampler _sampler, vec2 _coord)                    { return vec4(0,0,0,0);}
+#	endif // BGFX_SHADER_LANGUAGE_ESSL > 100
+
+#	if BGFX_SHADER_LANGUAGE_ESSL >= 310 
+vec4 textureSample(DEFAULT_PRECISION samplerCubeArray _sampler, vec4 _coord, float _lod) { return textureLod(_sampler, _coord, _lod);}
+#	endif // BGFX_SHADER_LANGUAGE_ESSL >= 310 
+
+vec4 textureSample(NoopSampler noopsampler, vec2 _coord)             { return vec4(0,0,0,0);}
+vec4 textureSample(NoopSampler noopsampler, vec3 _coord)             { return vec4(0,0,0,0);}
+vec4 textureSample(NoopSampler noopsampler, vec4 _coord)             { return vec4(0,0,0,0);}
+vec4 textureSample(NoopSampler noopsampler, vec2 _coord, float _lod) { return vec4(0,0,0,0);}
+vec4 textureSample(NoopSampler noopsampler, vec3 _coord, float _lod) { return vec4(0,0,0,0);}
+vec4 textureSample(NoopSampler noopsampler, vec4 _coord, float _lod) { return vec4(0,0,0,0);}
+NoopSampler getSampler(NoopSampler _sampler, NoopSampler _samplerState){ return _sampler;}
+
+#		define SAMPLER_STATE(_name, _reg) NoopSampler _name
+#		define SAMPLER_STATE_INTRINSIC(_name, _reg) NoopSampler _name
+
+#		define TEXTURE2D(_name, _precision, _reg, _regsampler)            NoopSampler _name
+#		define TEXTURE2DARRAY(_name, _precision, _reg, _regsampler)       NoopSampler _name
+#		define TEXTURE2DMS(_name, _precision, _reg, _regsampler)          NoopSampler _name
+#		define TEXTURE2DSHADOW(_name, _precision, _reg, _regsampler)      NoopSampler _name
+#		define TEXTURE2DARRAYSHADOW(_name, _precision, _reg, _regsampler) NoopSampler _name
+#		define TEXTURE3D(_name, _precision, _reg, _regsampler)            NoopSampler _name
+#		define TEXTURECUBE(_name, _precision, _reg, _regsampler)          NoopSampler _name
+#		define TEXTURECUBEARRAY(_name, _precision, _reg, _regsampler)     NoopSampler _name
+
+#		define TEXTURE2D_ARRAY(_name, _precision, _reg, _regsampler, _size)             NoopSampler _name[_size]
+#		define TEXTURE2DARRAY_ARRAY(_name, _precision, _reg, _regsampler, _size)        NoopSampler _name[_size]
+#		define TEXTURE2DMS_ARRAY(_name, _precision, _reg, _regsampler, _size)           NoopSampler _name[_size]
+#		define TEXTURE2DSHADOW_ARRAY(_name, _precision, _reg, _regsampler, _size)       NoopSampler _name[_size]
+#		define TEXTURE2DARRAYSHADOW_ARRAY(_name, _precision, _reg, _regsampler, _size)  NoopSampler _name[_size]
+#		define TEXTURE3D_ARRAY(_name, _precision, _reg, _regsampler, _size)             NoopSampler _name[_size]
+#		define TEXTURECUBE_ARRAY(_name, _precision, _reg, _regsampler, _size)           NoopSampler _name[_size]
+#		define TEXTURECUBEARRAY_ARRAY(_name, _precision, _reg, _regsampler, _size)      NoopSampler _name[_size]
+
+#	define STRUCTUREDBUFFER(_bindingName, _name, _type, _reg) layout(std430, binding = _reg) buffer _bindingName { _type _name []; }
+#	define RWSTRUCTUREDBUFFER(_bindingName, _name, _type, _reg) layout(std430, binding = _reg) buffer _bindingName { _type _name []; }
+
+	// Used as a substitute for compilation of fallback shaders 
+#	define STRUCTUREDBUFFER_ARRAY(_bindingName, _name, _type, _reg, _size) layout(std430) buffer _bindingName { _type _name [][_size]; }
+#	define RWSTRUCTUREDBUFFER_ARRAY(_bindingName, _name, _type, _reg, _size) layout(std430) buffer _bindingName { _type _name [][_size]; }
+
+#	if BGFX_SHADER_LANGUAGE_GLSL >= 130 || BGFX_SHADER_LANGUAGE_ESSL >= 300
+#		define ISAMPLER2D(_name, _precision, _reg, _regsampler) uniform _precision isampler2D _name
+#		define USAMPLER2D(_name, _precision, _reg, _regsampler) uniform _precision usampler2D _name
+#		define ISAMPLER3D(_name, _precision, _reg, _regsampler) uniform _precision isampler3D _name
+#		define USAMPLER3D(_name, _precision, _reg, _regsampler) uniform _precision usampler3D _name
+
+#		define texture2D(_sampler, _coord)        textureSample(_sampler, _coord)
+#		define texture2DArray(_sampler, _coord)   textureSample(_sampler, _coord)
+#		define texture3D(_sampler, _coord)        textureSample(_sampler, _coord)
+#		define textureCube(_sampler, _coord)      textureSample(_sampler, _coord)
+#		define textureCubeArray(_sampler, _coord) textureSample(_sampler, _coord)
+
+#		define texture2DLod(_sampler, _coord, _lod)        textureSample(_sampler, _coord, _lod)
+#		define texture2DArrayLod(_sampler, _coord, _lod)   textureSample(_sampler, _coord, _lod)
+#		define texture3DLod(_sampler, _coord, _lod)        textureSample(_sampler, _coord, _lod)
+#		define textureCubeArrayLod(_sampler, _coord, _lod) textureSample(_sampler, _coord, _lod)
+#	else // BGFX_SHADER_LANGUAGE_GLSL >= 130 || BGFX_SHADER_LANGUAGE_ESSL >= 300
+#		define ISAMPLER2D(_name, _precision, _reg, _regsampler) SAMPLER2D(_name, _precision, _reg, _regsampler)
+#		define USAMPLER2D(_name, _precision, _reg, _regsampler) SAMPLER2D(_name, _precision, _reg, _regsampler)
+#		define ISAMPLER3D(_name, _precision, _reg, _regsampler) SAMPLER3D(_name, _precision, _reg, _regsampler)
+#		define USAMPLER3D(_name, _precision, _reg, _regsampler) SAMPLER3D(_name, _precision, _reg, _regsampler)
+#	endif // BGFX_SHADER_LANGUAGE_GLSL >= 130 || BGFX_SHADER_LANGUAGE_ESSL >= 300
+
+vec3 instMul(vec3 _vec, mat3 _mtx) { return mul(_vec, _mtx); }
+vec3 instMul(mat3 _mtx, vec3 _vec) { return mul(_mtx, _vec); }
+vec4 instMul(vec4 _vec, mat4 _mtx) { return mul(_vec, _mtx); }
+vec4 instMul(mat4 _mtx, vec4 _vec) { return mul(_mtx, _vec); }
+
+float rcp(float _a) { return 1.0/_a; }
+vec2  rcp(vec2  _a) { return vec2(1.0)/_a; }
+vec3  rcp(vec3  _a) { return vec3(1.0)/_a; }
+vec4  rcp(vec4  _a) { return vec4(1.0)/_a; }
+#endif // BGFX_SHADER_LANGUAGE_*
+
+#	if	BGFX_SHADER_LANGUAGE_ESSL > 0
+#		define SAMPLER2DEXTERNAL(_name, _precision, _reg, _regsampler)		uniform _precision samplerExternalOES _name
+#	else
+#		define SAMPLER2DEXTERNAL(_name, _precision, _reg, _regsampler)		SAMPLER2D(_name, _precision, _reg, _regsampler)
+#	endif
+
+vec2 vec2_splat(float _x) { return vec2(_x, _x); }
+vec3 vec3_splat(float _x) { return vec3(_x, _x, _x); }
+vec4 vec4_splat(float _x) { return vec4(_x, _x, _x, _x); }
+
+ivec2 ivec2_splat(int _x) { return ivec2(_x, _x); }
+ivec3 ivec3_splat(int _x) { return ivec3(_x, _x, _x); }
+ivec4 ivec4_splat(int _x) { return ivec4(_x, _x, _x, _x); }
+
+#if BGFX_SHADER_LANGUAGE_GLSL >= 130 || BGFX_SHADER_LANGUAGE_HLSL || BGFX_SHADER_LANGUAGE_PSSL || BGFX_SHADER_LANGUAGE_SPIRV || BGFX_SHADER_LANGUAGE_METAL
+uvec2 uvec2_splat(uint _x) { return uvec2(_x, _x); }
+uvec3 uvec3_splat(uint _x) { return uvec3(_x, _x, _x); }
+uvec4 uvec4_splat(uint _x) { return uvec4(_x, _x, _x, _x); }
+#endif // BGFX_SHADER_LANGUAGE_GLSL >= 130 || BGFX_SHADER_LANGUAGE_HLSL || BGFX_SHADER_LANGUAGE_PSSL || BGFX_SHADER_LANGUAGE_SPIRV || BGFX_SHADER_LANGUAGE_METAL
+
+mat4 mtxFromRows(vec4 _0, vec4 _1, vec4 _2, vec4 _3)
+{
+#if BGFX_SHADER_LANGUAGE_GLSL
+    return transpose(mat4(_0, _1, _2, _3) );
+#else
+    return mat4(_0, _1, _2, _3);
+#endif // BGFX_SHADER_LANGUAGE_GLSL
+}
+
+mat4 mtxFromCols(vec4 _0, vec4 _1, vec4 _2, vec4 _3)
+{
+#if BGFX_SHADER_LANGUAGE_GLSL
+    return mat4(_0, _1, _2, _3);
+#else
+    return transpose(mat4(_0, _1, _2, _3) );
+#endif // BGFX_SHADER_LANGUAGE_GLSL
+}
+
+mat3 mtxFromRows(vec3 _0, vec3 _1, vec3 _2)
+{
+#if BGFX_SHADER_LANGUAGE_GLSL
+    return transpose(mat3(_0, _1, _2) );
+#else
+    return mat3(_0, _1, _2);
+#endif // BGFX_SHADER_LANGUAGE_GLSL
+}
+
+mat3 mtxFromCols(vec3 _0, vec3 _1, vec3 _2)
+{
+#if BGFX_SHADER_LANGUAGE_GLSL
+    return mat3(_0, _1, _2);
+#else
+    return transpose(mat3(_0, _1, _2) );
+#endif // BGFX_SHADER_LANGUAGE_GLSL
+}
+
+#if BGFX_SHADER_LANGUAGE_ESSL <= 100 && !BGFX_SHADER_LANGUAGE_PSSL
+float trunc(float _f)
+{
+	return float(int(_f));
+}
+#endif
+
+#if (BGFX_SHADER_LANGUAGE_GLSL && BGFX_SHADER_LANGUAGE_GLSL < 400 && !BGFX_SHADER_LANGUAGE_ESSL) || (BGFX_SHADER_LANGUAGE_ESSL && BGFX_SHADER_LANGUAGE_ESSL < 310)
+vec4 textureGather(sampler2D _sampler, vec2 _coord, int comp)
+{
+#if (BGFX_SHADER_LANGUAGE_ESSL >= 300)
+	ivec2 coord = ivec2(_coord * textureSize(_sampler, 0));
+#else
+	// TODO: compile out this function entirely for ESSL100 once we've fully
+	// deprecated it
+	// ESSL 100 -- unsupported
+	ivec2 coord = ivec2(_coord);
+#endif
+
+	if (comp == 0)
+	{
+		return vec4(texelFetch(_sampler, coord + ivec2(0, 1), 0).x,
+		            texelFetch(_sampler, coord + ivec2(1, 1), 0).x,
+		            texelFetch(_sampler, coord + ivec2(1, 0), 0).x,
+		            texelFetch(_sampler, coord, 0).x);
+	}
+	else if (comp == 1)
+	{
+		return vec4(texelFetch(_sampler, coord + ivec2(0, 1), 0).y,
+		            texelFetch(_sampler, coord + ivec2(1, 1), 0).y,
+		            texelFetch(_sampler, coord + ivec2(1, 0), 0).y,
+		            texelFetch(_sampler, coord, 0).y);
+	}
+	else if (comp == 2)
+	{
+		return vec4(texelFetch(_sampler, coord + ivec2(0, 1), 0).z,
+		            texelFetch(_sampler, coord + ivec2(1, 1), 0).z,
+		            texelFetch(_sampler, coord + ivec2(1, 0), 0).z,
+		            texelFetch(_sampler, coord, 0).z);
+	}
+	else if (comp == 3)
+	{
+		return vec4(texelFetch(_sampler, coord + ivec2(0, 1), 0).w,
+		            texelFetch(_sampler, coord + ivec2(1, 1), 0).w,
+		            texelFetch(_sampler, coord + ivec2(1, 0), 0).w,
+		            texelFetch(_sampler, coord, 0).w);
+	}
+	return vec4(0, 0, 0, 0);
+}
+#endif
+
+#if (BGFX_SHADER_LANGUAGE_ESSL && BGFX_SHADER_LANGUAGE_ESSL < 300)
+#	define sampler2DArray sampler2D
+#	define sampler2DArrayShadow sampler2D
+#endif
+
+#if !BGFX_SHADER_LANGUAGE_PSSL
+float fmod(float _a, float _b) { return _a - _b * trunc(_a / _b); }
+vec2 fmod(vec2 _a, vec2 _b) { return vec2(fmod(_a.x,_b.x), fmod(_a.y,_b.y)); }
+vec3 fmod(vec3 _a, vec3 _b) { return vec3(fmod(_a.x,_b.x), fmod(_a.y,_b.y), fmod(_a.z,_b.z)); }
+vec4 fmod(vec4 _a, vec4 _b) { return vec4(fmod(_a.x,_b.x), fmod(_a.y,_b.y), fmod(_a.z,_b.z), fmod(_a.w,_b.w)); }
+#endif
+
+#if BGFX_SHADER_NEEDS_UNIFORMS_BLOCK > 0
+#	define BGFX_BEGIN_UNIFORM_BLOCK(Name, Reg) layout(std140) uniform Name {
+#	define BGFX_END_UNIFORM_BLOCK };
+#else
+#if BGFX_SHADER_LANGUAGE_HLSL
+#	define BGFX_BEGIN_UNIFORM_BLOCK(Name, Reg) cbuffer Name : register(b##Reg) {
+#	define BGFX_END_UNIFORM_BLOCK };
+#else
+#	define BGFX_BEGIN_UNIFORM_BLOCK(Name, Reg)
+#	define BGFX_END_UNIFORM_BLOCK
+#endif
+#endif
+
+#if (BGFX_SHADER_LANGUAGE_HLSL > 0) || (BGFX_SHADER_LANGUAGE_METAL > 0) || (BGFX_SHADER_LANGUAGE_SPIRV > 0) || (BGFX_SHADER_LANGUAGE_PSSL > 0)
+#	define transformUVForScreen(_coord) vec2((_coord).x, (_coord).y)
+#else
+#	define transformUVForScreen(_coord) (vec2((_coord).x, 1.0 - (_coord).y))
+#endif
+
+// Helpers to return the min/max/product/sum of values in a vector
+
+#define lengthSqr(_a) dot(_a, _a)
+
+float min2(vec2 _a) { return min(_a.x, _a.y); }
+float min3(vec3 _a) { return min(_a.x, min(_a.y, _a.z)); }
+float min4(vec4 _a) { vec2 _min2 = min(_a.xy, _a.zw); return min(_min2.x, _min2.y); }
+
+float max2(vec2 _a) { return max(_a.x, _a.y); }
+float max3(vec3 _a) { return max(_a.x, max(_a.y, _a.z)); }
+float max4(vec4 _a) { vec2 _max2 = max(_a.xy, _a.zw); return max(_max2.x, _max2.y); }
+
+float prod2(vec2 _a) { return _a.x * _a.y; }
+float prod3(vec3 _a) { return _a.x * _a.y * _a.z; }
+float prod4(vec4 _a) { vec2 _prod2 = _a.xy * _a.zw; return _prod2.x * _prod2.y; }
+
+float sum2(vec2 _a) { return _a.x + _a.y; }
+float sum3(vec3 _a) { return _a.x + _a.y + _a.z; }
+float sum4(vec4 _a) { vec2 _sum2 = _a.xy + _a.zw; return _sum2.x + _sum2.y; }
+
+// Pow variants that require 3 or fewer multiplies
+
+// pow(x, 1.5)
+float pow1_5(float x) { return x * sqrt(x); }
+vec2  pow1_5(vec2  x) { return x * sqrt(x); }
+vec3  pow1_5(vec3  x) { return x * sqrt(x); }
+vec4  pow1_5(vec4  x) { return x * sqrt(x); }
+
+// pow(x, 2.0)  # 1 multiply
+float pow2(float x) { return x * x; }
+vec2  pow2(vec2  x) { return x * x; }
+vec3  pow2(vec3  x) { return x * x; }
+vec4  pow2(vec4  x) { return x * x; }
+
+// pow(x, 3.0)  # 2 multiplies
+float pow3(float x) { return x * x * x; }
+vec2  pow3(vec2  x) { return x * x * x; }
+vec3  pow3(vec3  x) { return x * x * x; }
+vec4  pow3(vec4  x) { return x * x * x; }
+
+// pow(x, 4.0)  # 2 multiplies
+float pow4(float x) { float x2 = x * x; return x2 * x2; }
+vec2  pow4(vec2  x) { vec2  x2 = x * x; return x2 * x2; }
+vec3  pow4(vec3  x) { vec3  x2 = x * x; return x2 * x2; }
+vec4  pow4(vec4  x) { vec4  x2 = x * x; return x2 * x2; }
+
+// pow(x, 5.0)  # 3 multiplies
+float pow5(float x) { float x2 = x * x; return x2 * x2 * x; }
+vec2  pow5(vec2  x) { vec2  x2 = x * x; return x2 * x2 * x; }
+vec3  pow5(vec3  x) { vec3  x2 = x * x; return x2 * x2 * x; }
+vec4  pow5(vec4  x) { vec4  x2 = x * x; return x2 * x2 * x; }
+
+// pow(x, 6.0)  # 3 multiplies
+float pow6(float x) { float x2 = x * x; return x2 * x2 * x2; }
+vec2  pow6(vec2  x) { vec2  x2 = x * x; return x2 * x2 * x2; }
+vec3  pow6(vec3  x) { vec3  x2 = x * x; return x2 * x2 * x2; }
+vec4  pow6(vec4  x) { vec4  x2 = x * x; return x2 * x2 * x2; }
+
+// pow7 skipped as it requires 4 multiplies
+
+// pow(x, 8.0)  # 3 multiplies
+float pow8(float x) { float x4 = pow4(x); return x4 * x4; }
+vec2  pow8(vec2  x) { vec2  x4 = pow4(x); return x4 * x4; }
+vec3  pow8(vec3  x) { vec3  x4 = pow4(x); return x4 * x4; }
+vec4  pow8(vec4  x) { vec4  x4 = pow4(x); return x4 * x4; }
+
+// pow(x, y), undefined for x < 0
+// Note: redefined pow as power so the linter can catch and warn about explicit uses of pow
+float power(float x, float y) { return pow(x, y); }
+vec2  power(vec2  x, vec2  y) { return pow(x, y); }
+vec3  power(vec3  x, vec3  y) { return pow(x, y); }
+vec4  power(vec4  x, vec4  y) { return pow(x, y); }
+#endif // __cplusplus
+
+// On platforms which supports Compute, including the compute header produces valid
+// code. This is helpful as a generic shader can still technically access RWBuffer and so on
+#include "bgfx_compute.dragonh"
+
+// bgfx_raytracing.dragonh is safely guarded with preprocessor directives, but contain macros 
+// that are important to ensure PS4 materials do not fail
+#include "bgfx_raytracing.dragonh"
+
+#endif // BGFX_SHADER_H_HEADER_GUARD

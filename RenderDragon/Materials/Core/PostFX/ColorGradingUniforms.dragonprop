@@ -1,0 +1,21 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+[Vector] ColorGrading_Temperature_Params : (0.0, 0.0, 0.0, 0.0) // enabled.x, temperature.y, type.z, unused.w
+[Vector] ColorGrading_Contrast_Highlights : (0.0, 0.0, 0.0, 0.0) // contrastHighlights.xyz, contrastHighlightsEnabled.w
+[Vector] ColorGrading_Contrast_Midtones : (0.0, 0.0, 0.0, 0.0) // contrastMidtones.xyz, contrastMidtonesEnabled.w
+[Vector] ColorGrading_Contrast_Shadows : (0.0, 0.0, 0.0, 0.0) // contrastShadows.xyz, contrastShadowsEnabled.w
+[Vector] ColorGrading_Saturation_Highlights : (0.0, 0.0, 0.0, 0.0) // saturationHighlights.xyz, saturationHighlightsEnabled.w
+[Vector] ColorGrading_Saturation_Midtones : (0.0, 0.0, 0.0, 0.0) // saturationMidtones.xyz, saturationMidtonesEnabled.w
+[Vector] ColorGrading_Saturation_Shadows : (0.0, 0.0, 0.0, 0.0) // saturationShadows.xyz, saturationShadowsEnabled.w
+[Vector] ColorGrading_Gain_Highlights : (0.0, 0.0, 0.0, 0.0) // gainHighlights.xyz, gainHighlightsEnabled.w
+[Vector] ColorGrading_Gain_Midtones : (0.0, 0.0, 0.0, 0.0) // gainMidtones.xyz, gainMidtonesEnabled.w
+[Vector] ColorGrading_Gain_Shadows : (0.0, 0.0, 0.0, 0.0) // gainShadows.xyz, gainShadowsEnabled.w
+[Vector] ColorGrading_Offset_Highlights : (0.0, 0.0, 0.0, 0.0) // offsetHighlights.xyz, offsetHighlightsEnabled.w
+[Vector] ColorGrading_Offset_Midtones : (0.0, 0.0, 0.0, 0.0) // offsetMidtones.xyz, offsetMidtonesEnabled.w
+[Vector] ColorGrading_Offset_Shadows : (0.0, 0.0, 0.0, 0.0) // offsetShadows.xyz, offsetShadowsEnabled.w
+[Vector] ColorGrading_Gamma_Highlights : (0.0, 0.0, 0.0, 0.0) // gammaHighlights.xyz, gammaHighlightsEnabled.w
+[Vector] ColorGrading_Gamma_Midtones : (0.0, 0.0, 0.0, 0.0) // gammaMidtones.xyz, gammaMidtonesEnabled.w
+[Vector] ColorGrading_Gamma_Shadows : (0.0, 0.0, 0.0, 0.0) // gammaShadows.xyz, gammaShadowsEnabled.w
+[Vector] ColorGrading_Misc : (0.0, 0.0, 0.0, 0.0) // pivot.x, highlightMin.y, shadowMax.z, playerGamma.w
+[Vector] ColorGrading_Misc2 : (0.0, 0.0, 0.0, 0.0) // optimizeGammaCorrection.x, unused.y, unused.z, unused.w

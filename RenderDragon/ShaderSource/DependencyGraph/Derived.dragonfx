@@ -1,0 +1,29 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+MaterialDefinition "DerivedTestMaterial" : "BaseTestMaterial"
+{
+	Standard
+	{
+		[Option] SurfaceFunction : Surf
+		[Option] Lighting : NdotL
+
+		Shader:Standard
+		{
+			void Surf(in StandardSurfaceInput surfaceInput, inout StandardSurfaceOutput surfaceOutput) {
+			}
+		}
+	}
+	Pass "AlphaTest"
+	{
+		[Option] SurfaceFunction : SurfAlpha
+
+		Shader:Standard "Opaque"
+		{
+			#include "DerivedUtils.dragonh"
+			void SurfAlpha(in StandardSurfaceInput surfaceInput, inout StandardSurfaceOutput surfaceOutput) {
+				surfaceOutput.Color0 = testDiffuse(surfaceInput, vec4(0.0, 0.0, 0.0, 0.0));
+			}
+		}
+	}
+}

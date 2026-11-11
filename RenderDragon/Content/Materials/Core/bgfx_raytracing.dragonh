@@ -1,0 +1,153 @@
+#ifndef BGFX_RAYTRACING_H_HEADER_GUARD
+#define BGFX_RAYTRACING_H_HEADER_GUARD
+
+#if BGFX_SHADER_LANGUAGE_HLSL >= 65
+
+#if BX_PLATFORM_SCARLETT == 1
+
+#define __HLSL_VERSION 2018
+
+#include "XDXRStandaloneTraverseShortStack.hlsli"
+#	define rayQueryKHR XboxRayQuery
+#else
+#	define rayQueryKHR RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES>
+#endif
+
+#define accelerationStructureKHR RaytracingAccelerationStructure
+
+#define gl_RayQueryCandidateIntersectionTriangleKHR CANDIDATE_NON_OPAQUE_TRIANGLE
+#define gl_RayQueryCandidateIntersectionAABBKHR CANDIDATE_PROCEDURAL_PRIMITIVE
+
+#define gl_RayQueryCommittedIntersectionNoneKHR COMMITTED_NOTHING
+#define gl_RayQueryCommittedIntersectionTriangleKHR COMMITTED_TRIANGLE_HIT
+#define gl_RayQueryCommittedIntersectionGeneratedKHR COMMITTED_PROCEDURAL_PRIMITIVE_HIT
+
+void rayQueryInitializeKHR(
+	inout rayQueryKHR q,
+	in accelerationStructureKHR topLevel,
+	uint rayFlags, 
+	uint cullMask,  
+	vec3 origin,
+	float tMin, 
+	vec3 direction,
+	float tMax
+) {
+	RayDesc ray;	
+	ray.TMin = tMin;
+	ray.TMax = tMax;
+	ray.Origin = origin;
+	ray.Direction = direction;
+
+	q.TraceRayInline(topLevel, RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | rayFlags, cullMask, ray);
+}
+
+bool rayQueryProceedKHR(inout rayQueryKHR q) {
+	return q.Proceed();
+}
+
+uint rayQueryGetIntersectionTypeKHR(rayQueryKHR q, bool committed) {
+	if(committed) {
+		return q.CommittedStatus();
+	} else {
+		return q.CandidateType();
+	}
+}
+
+void rayQueryConfirmIntersectionKHR(inout rayQueryKHR q) {
+	q.CommitNonOpaqueTriangleHit();
+}
+	
+int rayQueryGetIntersectionPrimitiveIndexKHR(rayQueryKHR q, bool committed) {
+	if(committed) {	
+		return q.CommittedPrimitiveIndex();
+	} else {
+		return q.CandidatePrimitiveIndex();
+	}
+}
+
+vec2 rayQueryGetIntersectionBarycentricsKHR(rayQueryKHR q, bool committed) {
+	if(committed) {
+		return q.CommittedTriangleBarycentrics();
+	} else {
+		return q.CandidateTriangleBarycentrics();
+	}
+}
+
+float rayQueryGetIntersectionTKHR(rayQueryKHR q, bool committed) {
+	return q.CommittedRayT();
+}
+
+vec3 rayQueryGetWorldRayOriginKHR(rayQueryKHR q) {
+	return q.WorldRayOrigin();
+}
+
+vec3 rayQueryGetWorldRayDirectionKHR(rayQueryKHR q) {
+	return q.WorldRayDirection();
+}
+
+#define ACCELERATION_STRUCTURE(_bindingName, _name, _reg) RaytracingAccelerationStructure _bindingName : REGISTER(t, _reg)
+
+#else // BGFX_SHADER_LANGUAGE_HLSL
+
+struct rayQueryKHR { int noop; };
+struct accelerationStructureKHR { int noop; };
+
+#define gl_RayQueryCandidateIntersectionTriangleKHR 0
+#define gl_RayQueryCandidateIntersectionAABBKHR 1
+
+#define gl_RayQueryCommittedIntersectionNoneKHR 0
+#define gl_RayQueryCommittedIntersectionTriangleKHR 1
+#define gl_RayQueryCommittedIntersectionGeneratedKHR 2
+
+void rayQueryInitializeKHR(
+	rayQueryKHR q,
+	accelerationStructureKHR topLevel,
+	uint rayFlags, 
+	uint cullMask,  
+	vec3 origin,
+	float tMin, 
+	vec3 direction, 
+	float tMax
+) {
+}
+
+bool rayQueryProceedKHR(rayQueryKHR q) {
+	return false;
+}
+
+uint rayQueryGetIntersectionTypeKHR(rayQueryKHR q, bool committed) {
+	return 0u;
+}
+
+void rayQueryConfirmIntersectionKHR(rayQueryKHR q) {
+}
+	
+int rayQueryGetIntersectionPrimitiveIndexKHR(rayQueryKHR q, bool committed) {
+	return 0;
+}
+
+vec2 rayQueryGetIntersectionBarycentricsKHR(rayQueryKHR q, bool committed) {
+	return vec2(0.0, 0.0);
+}
+
+float rayQueryGetIntersectionTKHR(rayQueryKHR q, bool committed) {
+	return 0.f;
+}
+
+vec3 rayQueryGetWorldRayOriginKHR(rayQueryKHR q) {
+	return vec3(0.0, 0.0, 0.0);
+}
+
+vec3 rayQueryGetWorldRayDirectionKHR(rayQueryKHR q) {
+	return vec3(0.0, 0.0, 0.0);
+}
+
+#if BGFX_SHADER_LANGUAGE_METAL
+	#define ACCELERATION_STRUCTURE(_bindingName, _name, _reg) static accelerationStructureKHR _bindingName
+#else
+	#define ACCELERATION_STRUCTURE(_bindingName, _name, _reg) accelerationStructureKHR _bindingName
+#endif
+
+#endif // BGFX_SHADER_LANGUAGE_HLSL
+
+#endif // BGFX_RAYTRACING_H_HEADER_GUARD

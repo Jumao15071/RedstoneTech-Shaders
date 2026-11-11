@@ -1,0 +1,211 @@
+// Copyright (c) Microsoft Corporation.  All rights reserved.
+
+MaterialDefinition "LightClustering"
+{
+	Types
+	{
+		LightCluster
+		{
+			[int] count
+		}
+
+		LightData
+		{
+			[float] lookup
+		}
+
+		LightExtends 
+		{
+			[vec4] min
+			[vec4] max
+			[vec4] pos
+			[int] index
+			[float] radius
+			[int] pad1
+			[int] pad2
+		}
+		LightContribution
+		{
+			[float] contribution
+			[int] indexInLookUp
+		}
+	}
+	
+	Properties 
+	{
+		[RWStructuredBuffer:LightData] zLightLookupArray
+		[StructuredBuffer:LightExtends] Extends
+		[Vector] ClusterDimensions : (0, 0, 0, 0) // max IdX, max IdY, max IdZ, light count
+		[Float] LightsPerCluster : 16.0
+		[Vector] ClusterNearFarWidthHeight : (0, 0, 0, 0) // cluster near plane, cluster far plane, width of the viewport, height of the viewport
+		[Vector] CameraFarPlane : (0, 0, 0, 0) // width, height, camera far plane
+		[Vector] ClusterSize: (0, 0, 0, 0) // x, y, unused, unused
+		[Vector] ClusterDepthBounds: (0, 0, 0, 0)
+		[Vector] PointLightPreCalcValues : (0.0, 0.0, 0.0, 0.0)
+	}
+
+	Shared {
+
+		Code {
+			#define MAX_LIGHT_PER_CLUSTER 64
+		}
+	}
+
+	Pass "ClusterLights"
+	{
+		[Option] GraphicsProfile : HiDef
+		[Option] KernelFunction : ClusterLights
+		[Option] Fallback : Fallback
+		[Option] Threads : "4, 4, 4"
+
+		[Flag] AngularRefinement : On, Off
+
+		Shader:Compute
+		{
+			#include "Util/TransformUtil.dragonh"
+			#include "Core/Lighting/LightClusteringUtil.dragonh"
+
+			// Returns true if the light (sphere) covers the single cluster/tile at dispatch indices (tileX, tileY, tileZ)
+			bool lightCoversTile(
+				vec3 viewPos,
+				float radius,
+				vec3 clusterCount,
+				vec3 clusterSize,
+				float tanHalfFovY,
+				float aspectRatio,
+				uvec3 tileIndex // (tileX, tileY, tileZ)
+			) {
+				// Light sphere squared distance from view position
+				float distToCenterSq = dot(viewPos, viewPos);
+				float radiusSq = radius * radius;
+
+				// Early-out if viewPos is inside the sphere and in front of near plane
+				if (distToCenterSq <= radiusSq) {
+					return true;
+				}
+
+				// Precompute tanHalfFovX and shared angle bounds
+				float tanHalfFovX = aspectRatio * tanHalfFovY;
+				float xEdge = atan(tanHalfFovX);
+				float yEdge = atan(tanHalfFovY);
+
+				// Per-tile angular size
+				float xClusterSizeAngle = 2.0 * xEdge / clusterCount.x;
+				float yClusterSizeAngle = 2.0 * yEdge / clusterCount.y;
+
+				// Tile bounds (center)
+				float xCenterAngle = -xEdge + (float(tileIndex.x) + 0.5) * xClusterSizeAngle;
+				float yCenterAngle = -yEdge + (float(tileIndex.y) + 0.5) * yClusterSizeAngle;
+
+				// Light's angular position in view space
+				float xAngle = atan2(viewPos.x, -viewPos.z);
+				float yAngle = atan2(viewPos.y, -viewPos.z);
+
+				// Spherical overlap test -- work with sin^2(angle) instead of angle
+				vec2 d = vec2(xCenterAngle - xAngle, yCenterAngle - yAngle);
+				return dot(d, d) < (radiusSq / distToCenterSq);
+			}
+
+			void ClusterLights() {
+				float x = float(GlobalInvocationID.x);
+				float y = float(GlobalInvocationID.y);
+				float z = float(GlobalInvocationID.z);
+				int lightCount = int(ClusterDimensions.w);
+				int maxLights = int(LightsPerCluster);
+
+				if (x >= ClusterDimensions.x || y >= ClusterDimensions.y || z >= ClusterDimensions.z) {
+					return;
+				}
+
+				highp int idx = int(x + y * ClusterDimensions.x + z * ClusterDimensions.x * ClusterDimensions.y);
+
+				highp int rangeStart = int(idx * maxLights);
+				highp int rangeEnd = int(rangeStart + maxLights);
+								
+				vec3 center = getViewPositionFromClusterIndex(
+					vec3(x + 0.5, y + 0.5, z + 0.5),
+					ClusterNearFarWidthHeight.xy,
+					ClusterDimensions.xyz,
+					ClusterDepthBounds.z,
+					ClusterDepthBounds.w,
+					ClusterDepthBounds.xy,
+					PointLightPreCalcValues
+				);
+
+				// A temp array for sorting
+				LightContribution distanceToCenter[MAX_LIGHT_PER_CLUSTER];
+
+				int countResult = 0;
+				for (int l = 0; l < lightCount; l++) {
+					LightExtends bound = Extends[l];
+
+					if (z < bound.min.z || z > bound.max.z) continue;
+					if (y < bound.min.y || y > bound.max.y) continue;
+					if (x < bound.min.x || x > bound.max.x) continue;
+					
+#if flag(AngularRefinement, On)
+					if(!lightCoversTile(bound.pos.xyz, bound.radius, ClusterDimensions.xyz, ClusterSize.xyy, ClusterDepthBounds.z, ClusterDepthBounds.w, ivec3(x, y, z))) continue;
+#endif
+					// Sort
+					// It's the view pos.
+					float curDistance = length(bound.pos.xyz - center);
+					if (countResult >= maxLights && curDistance >= distanceToCenter[countResult - 1].contribution) {
+						continue;
+					}
+
+					// Binary search
+					int low = 0;
+					int high = countResult;
+					while(low < high) {
+						int mid = (low + high) / 2;
+						if (distanceToCenter[mid].contribution < curDistance) {
+							low = mid + 1;
+						}
+						else {
+							high = mid;
+						}
+					}
+					// Insert the value into the array
+					if(countResult < maxLights) {
+						for(int j = countResult - 1; j >= low; j--){
+							distanceToCenter[j + 1] = distanceToCenter[j];
+						}
+						distanceToCenter[low].contribution = curDistance;
+						distanceToCenter[low].indexInLookUp = countResult;
+						zLightLookupArray[idx * maxLights + countResult].lookup = float(bound.index);
+						countResult++;
+					}
+					else {
+						int insertPos = distanceToCenter[maxLights - 1].indexInLookUp;
+						for(int j = maxLights - 2; j >= low; j--){
+							distanceToCenter[j + 1] = distanceToCenter[j];
+						}
+						distanceToCenter[low].contribution = curDistance;
+						distanceToCenter[low].indexInLookUp = insertPos;
+						zLightLookupArray[idx * maxLights + insertPos].lookup = float(bound.index);
+					}
+				}
+
+				// If the number of lights in the cluster is less than the maximum allowed, add an index of -1
+				// after the final light to mark the end of the light list.
+				if (countResult < maxLights) {
+					zLightLookupArray[rangeStart + countResult].lookup = -1.0;
+				}
+			}
+		}
+	}
+
+	Pass "Fallback" {
+		[Option] VertexFunction : Vert
+		[Option] FragmentFunction : Frag
+
+		Shader: Custom{
+			void Vert(VertexInput vertInput, inout VertexOutput vertOutput) {
+			}
+
+			void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+				fragOutput.Color0 = vec4(0.0, 0.0, 0.0, 0.0);
+			}
+		}
+	}
+}

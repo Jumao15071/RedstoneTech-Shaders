@@ -1,0 +1,170 @@
+
+// Copyright (c) Mojang AB.  All rights reserved.
+
+#pragma once
+
+#include "Util/ColorUtil.dragonh"
+
+/**
+ \brief This function can be used to adjust the color temperature of a linear RGB image.
+		Color temperature describes the temperature of a light source in Kelvin.
+		Light sources with lower temperatures produce warm (orange) colors and the ones with higher temperatures produce cool (blue) colors.
+		White balance is the operation to correct what's considered the white point of a camera.
+	    In this mode, scene lights of the chosen temperature will appear white,
+	    lights with lower temperatures will appear warm, lights with higher temperatures will appear cool.
+		By setting the temperature to the minimum value, all the lights will be higher and thus the scene will turn cool.
+		Color temperature is the inverse operation, that is, the operation to correct the color temperature of the scene.
+	    In this mode, scene lights of the chosen temperature will appear white,
+	    lights with higher temperatures will appear warm, lights with lower temperatures will appear cool.
+		White point D65 is the reference of white used in the correction.
+		Reference: https://en.wikipedia.org/wiki/White_point#:~:text=Expressing%20color%20as,the%20inverse%20transform.
+
+ \param inColor a color in linear RGB space that will have temperature correction applied to it
+ \param temperature a temperature in Kelvin. For White Balance mode, it means the temperature that should appear white.
+        For Color Temperature mode, it means the temperature the scene should appear to have.
+ \param type type is 0 for White Balance and 1 for Color Temperature
+
+ \return Returns the inColor after color temperature is corrected
+*/
+vec3 ApplyTemperatureGrading(vec3 inColor, float temperature, int type) {
+
+	// luminance can be any value, what is import is that the white point and color temperature
+	// have the same luminance, since the gain is a ratio between the two.
+	const float Y = 1.0f;
+
+	// white point D65 for the sRGB standard. Its color temperature is approximately 6500K.
+	const vec3 whiteD65InLMS = mul(getCAT02XYZToLMSTransform(), xyYToXYZ(vec3(D65_WHITE_POINT, Y)));
+
+	const vec3 temperatureInLMS = mul(getCAT02XYZToLMSTransform(), temperatureToXYZ(temperature, Y));
+	const bool whiteBalance = type == 0;
+	const vec3 gainLMS = whiteBalance ?
+		whiteD65InLMS / temperatureInLMS : //white balance
+		temperatureInLMS / whiteD65InLMS;  //color temperature
+
+	const mat3 applyGain = mat3(
+	   gainLMS.x, 0.0,       0.0,
+	   0.0,       gainLMS.y, 0.0,
+	   0.0,       0.0,       gainLMS.z
+	);
+
+	return mul(mul(getCAT02LMStosRGBTransform(), mul(applyGain, getCAT02sRGBtoLMSTransform())), inColor);
+}
+
+/**
+ \brief This function can be used to adjust the contrast of a linear RGB image.
+		Contrast describes the difference in luminance between the bright and dark pixels in an image
+		An image with high contrast will have pixels far apart in luminance values.
+		An image where all pixels are a similar luminance is low contrast.
+
+ \param inColor a color in linear RGB space that will have the contrast factor applied to it
+ \param contrast determines how intense the contrast is.
+		1.f is no change to the image while 0.f will cause the image to be gray. Values higher than 1.f increase contrast
+ \param contrastPivot determines the luminance value which the contrast will pivot around.
+		Pixels with a luminace higher than the pivot will get brighter while pixels with a lower luminance will get darker
+
+ \return Returns the inColor after contrast is applied
+*/
+vec3 ApplyContrast(vec3 inColor, vec3 contrast, float contrastPivot) {
+	vec3 pivotVec = vec3_splat(contrastPivot);
+	vec3 colorClamp = max(inColor, vec3(0.0, 0.0, 0.0));
+	vec3 outColor = (pivotVec * power(colorClamp / pivotVec, contrast));
+	return max(outColor, vec3_splat(0.0f));
+}
+
+/**
+ \brief This function can be used to adjust the saturation of an image
+ \param inColor a color that will have the saturation factor applied to it
+ \param saturation determines how saturated the output image is.
+		1.f is no change to the image while 0.f will cause the image to be black and white. Values higher than 1.f increase saturation
+ \return Returns the inColor after saturation is applied.
+
+ The max saturation that can be applied without causing a color channel to leave the allowed range must be calculated per a color channel.
+ If the input saturation is greater than the max saturation for any channel, all saturation channels are scaled down.
+ The ratio between saturation channels is maintained. This is done to prevent unintended hue shifting in colors at the end of the accepted range
+*/
+vec3 ApplySaturation(vec3 inColor, vec3 saturation) {
+	float lumi = luminance(inColor);
+	vec3 saturatedColor = mix(vec3_splat(lumi), inColor, saturation);
+	return max(saturatedColor, vec3_splat(0.0f));
+}
+
+/**
+ \brief This function can be used to adjust the gain of an image
+ \param inColor a color that will have the gain factor applied to it
+ \param gain the amount that the inColor will be multiplied by.
+		A value of 1 will not cause change while a value of 0.5 will half the output color and a value of 2.0 will double it
+ \return Returns the inColor after gain is applied.
+*/
+vec3 ApplyGain(vec3 inColor, vec3 gain) {
+	return max(inColor * gain, vec3_splat(0.0f));
+}
+
+/**
+ \brief This function can be used to adjust the offset of an image
+ \param inColor a color that will have the offset factor applied to it
+ \param offset determines how intense the offset is.
+		
+ \return Returns the inColor after offset is applied.
+*/
+vec3 ApplyOffset(vec3 inColor, vec3 offset) {
+	return max(inColor + offset, vec3_splat(0.0f));
+}
+
+vec3 ApplyColorGrading(vec3 inColor, float averageLuminance) {
+	vec3 outColor = inColor;
+	float finalLuminance = luminance(inColor);
+
+	if(TemperatureGradingEnabled) {
+		outColor = ApplyTemperatureGrading(outColor, TemperatureGradingTemp, TemperatureGradingType);
+	}
+
+	vec3 gradingVector = getGradingVector(
+		ContrastHighlights,
+		ContrastShadows,
+		ContrastMidtones,
+		averageLuminance,
+		finalLuminance,
+		1.0f,
+		ContrastHighlightsEnabled,
+		ContrastMidtonesEnabled,
+		ContrastShadowsEnabled);
+	outColor = ApplyContrast(outColor, gradingVector, ContrastPivot * averageLuminance);
+
+	gradingVector = getGradingVector(
+		SaturationHighlights,
+		SaturationShadows,
+		SaturationMidtones,
+		averageLuminance,
+		finalLuminance,
+		1.0f,
+		SaturationHighlightsEnabled,
+		SaturationMidtonesEnabled,
+		SaturationShadowsEnabled);
+	outColor = ApplySaturation(outColor, gradingVector);
+
+	gradingVector = getGradingVector(
+		GainHighlights,
+		GainShadows,
+		GainMidtones,
+		averageLuminance,
+		finalLuminance,
+		1.0f,
+		GainHighlightsEnabled,
+		GainMidtonesEnabled,
+		GainShadowsEnabled);
+	outColor = ApplyGain(outColor, gradingVector);
+
+	gradingVector = getGradingVector(
+		OffsetHighlights,
+		OffsetShadows,
+		OffsetMidtones,
+		averageLuminance,
+		finalLuminance,
+		0.0f,
+		OffsetHighlightsEnabled,
+		OffsetMidtonesEnabled,
+		OffsetShadowsEnabled);
+	outColor = ApplyOffset(outColor, vec3_splat(averageLuminance) * gradingVector);
+
+	return outColor; 
+}
