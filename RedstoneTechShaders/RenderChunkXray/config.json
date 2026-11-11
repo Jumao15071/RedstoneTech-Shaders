@@ -1,0 +1,12 @@
+{
+  "compiler": {
+    "type": "shaderc"
+  },
+  "file_overwrite": {
+    "default": {
+      "fragment": "../RenderChunk/shaders/fragment_xray.sc",
+      "vertex": "../RenderChunk/shaders/vertex.sc",
+      "varying": "../RenderChunk/shaders/varying.def.sc"
+    }
+  }
+}

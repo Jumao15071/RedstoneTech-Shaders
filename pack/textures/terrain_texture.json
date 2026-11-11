@@ -1,0 +1,68 @@
+{
+  "resource_pack_name": "rtshaders",
+  "texture_name": "atlas.terrain",
+  "padding": 8,
+  "num_mip_levels": 4,
+  "texture_data": {
+    "redstone_torch_carried": {
+      "textures": "textures/items/redstone_torch"
+    },
+    "coal_ore": {
+      "textures": "textures/blocks/glow/coal_ore"
+    },
+    "deepslate_coal_ore": {
+      "textures": "textures/blocks/glow/deepslate_coal_ore"
+    },
+    "copper_ore": {
+      "textures": "textures/blocks/glow/copper_ore"
+    },
+    "deepslate_copper_ore": {
+      "textures": "textures/blocks/glow/deepslate_copper_ore"
+    },
+    "diamond_ore": {
+      "textures": "textures/blocks/glow/diamond_ore"
+    },
+    "deepslate_diamond_ore": {
+      "textures": "textures/blocks/glow/deepslate_diamond_ore"
+    },
+    "emerald_ore": {
+      "textures": "textures/blocks/glow/emerald_ore"
+    },
+    "deepslate_emerald_ore": {
+      "textures": "textures/blocks/glow/deepslate_emerald_ore"
+    },
+    "gilded_blackstone": {
+      "textures": "textures/blocks/glow/gilded_blackstone"
+    },
+    "gold_ore": {
+      "textures": "textures/blocks/glow/gold_ore"
+    },
+    "deepslate_gold_ore": {
+      "textures": "textures/blocks/glow/deepslate_gold_ore"
+    },
+    "iron_ore": {
+      "textures": "textures/blocks/glow/iron_ore"
+    },
+    "deepslate_iron_ore": {
+      "textures": "textures/blocks/glow/deepslate_iron_ore"
+    },
+    "lapis_ore": {
+      "textures": "textures/blocks/glow/lapis_ore"
+    },
+    "deepslate_lapis_ore": {
+      "textures": "textures/blocks/glow/deepslate_lapis_ore"
+    },
+    "nether_gold_ore": {
+      "textures": "textures/blocks/glow/nether_gold_ore"
+    },
+    "quartz_ore": {
+      "textures": "textures/blocks/glow/quartz_ore"
+    },
+    "redstone_ore": {
+      "textures": "textures/blocks/glow/redstone_ore"
+    },
+    "deepslate_redstone_ore": {
+      "textures": "textures/blocks/glow/deepslate_redstone_ore"
+    }
+  }
+}

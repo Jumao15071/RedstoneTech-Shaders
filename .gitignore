@@ -2,5 +2,10 @@
 /env
 build
 *.material.bin
+!pack/renderer/materials/RenderChunk.material.bin
 .vscode
-materials/shaderc.exe
+.acl-recovery
+__pycache__/
+*.pyc
+local.env.bat
+press/src

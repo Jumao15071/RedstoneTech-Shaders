@@ -1,0 +1,67 @@
+{
+    "format_version": 2,
+    "header": {
+        "name": "Redstone Technical Shader [26.60+]",
+        "description": "Originally made by github.com/OEOTYAN\nUpdated by github.com/Jumao15071\nSupports Android (MB Loader), iOS (Minecraft with Hynis) and Windows (BetterRenderDragon)",
+        "uuid": "a1cf2ab9-3834-455e-8658-c10ccfb403a4",
+        "version": [ 1, 3, 0 ],
+        "min_engine_version": [ 1, 26, 60 ]
+    },
+    "modules": [
+        {
+            "type": "resources",
+            "uuid": "b137eae5-c424-498f-b5dc-0a104dda32dd",
+            "version": [ 1, 3, 0 ]
+        }
+    ],
+    "subpacks": [
+        {
+            "folder_name": "X-ray",
+            "name": "矿透模式，严禁违规滥用&分发&圈钱 §7[X-ray]",
+            "memory_tier": 2
+        },
+        {
+            "folder_name": "NoChunkBorders-NightVision-LightOverlay",
+            "name": "无区块显示+带夜视+亮度显示 §7[NoChunkBorders-NightVision-LightOverlay]",
+            "memory_tier": 2
+        },
+        {
+            "folder_name": "NoChunkBorders-NightVision",
+            "name": "无区块显示+带夜视 §7[NoChunkBorders-NightVision]",
+            "memory_tier": 2
+        },
+        {
+            "folder_name": "NoChunkBorders-LightOverlay",
+            "name": "无区块显示+带亮度显示 §7[NoChunkBorders-LightOverlay]",
+            "memory_tier": 2
+        },
+        {
+            "folder_name": "NoChunkBorders",
+            "name": "无区块显示 §7[NoChunkBorders]",
+            "memory_tier": 2
+        },
+        {
+            "folder_name": "NightVision-LightOverlay",
+            "name": "夜视+亮度显示 §7[NightVision-LightOverlay]",
+            "memory_tier": 2
+        },
+        {
+            "folder_name": "NightVision",
+            "name": "夜视 §7[NightVision]",
+            "memory_tier": 2
+        },
+        {
+            "folder_name": "LightOverlay",
+            "name": "亮度显示 §7[LightOverlay]",
+            "memory_tier": 2
+        },
+        {
+            "folder_name": "Default",
+            "name": "默认 §7[Default]",
+            "memory_tier": 8
+        }
+    ],
+    "capabilities": [
+        "pbr" // enable vibrant visuals
+    ]
+}

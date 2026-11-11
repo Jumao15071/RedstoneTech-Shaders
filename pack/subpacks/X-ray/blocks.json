@@ -1,0 +1,113 @@
+{
+  "grass": {
+    "textures": {
+      "up": "grass_top",
+      "down": "dirt",
+      "side": "grass_top"
+    }
+  },
+  "diamond_ore": {
+    "blockshape": "chorus_flower",
+    "textures": "diamond_ore"
+  },
+  "iron_ore": {
+    "blockshape": "chorus_flower",
+    "textures": "iron_ore"
+  },
+  "coal_ore": {
+    "blockshape": "chorus_flower",
+    "textures": "coal_ore"
+  },
+  "gold_ore": {
+    "blockshape": "chorus_flower",
+    "textures": "gold_ore"
+  },
+  "redstone_ore": {
+    "blockshape": "chorus_flower",
+    "textures": "redstone_ore"
+  },
+  "lit_redstone_ore": {
+    "blockshape": "chorus_flower",
+    "textures": "redstone_ore"
+  },
+  "lapis_ore": {
+    "blockshape": "chorus_flower",
+    "textures": "lapis_ore"
+  },
+  "emerald_ore": {
+    "blockshape": "chorus_flower",
+    "textures": "emerald_ore"
+  },
+  "copper_ore": {
+    "blockshape": "chorus_flower",
+    "textures": "copper_ore"
+  },
+  "deepslate_lapis_ore": {
+    "blockshape": "chorus_flower",
+    "isotropic": false,
+    "textures": "deepslate_lapis_ore"
+  },
+  "deepslate_iron_ore": {
+    "blockshape": "chorus_flower",
+    "isotropic": false,
+    "textures": "deepslate_iron_ore"
+  },
+  "deepslate_gold_ore": {
+    "blockshape": "chorus_flower",
+    "isotropic": false,
+    "textures": "deepslate_gold_ore"
+  },
+  "deepslate_redstone_ore": {
+    "blockshape": "chorus_flower",
+    "isotropic": false,
+    "textures": "deepslate_redstone_ore"
+  },
+  "lit_deepslate_redstone_ore": {
+    "blockshape": "chorus_flower",
+    "isotropic": false,
+    "textures": "deepslate_redstone_ore"
+  },
+  "deepslate_diamond_ore": {
+    "blockshape": "chorus_flower",
+    "isotropic": false,
+    "textures": "deepslate_diamond_ore"
+  },
+  "deepslate_coal_ore": {
+    "blockshape": "chorus_flower",
+    "isotropic": false,
+    "textures": "deepslate_coal_ore"
+  },
+  "deepslate_emerald_ore": {
+    "blockshape": "chorus_flower",
+    "isotropic": false,
+    "textures": "deepslate_emerald_ore"
+  },
+  "deepslate_copper_ore": {
+    "blockshape": "chorus_flower",
+    "isotropic": false,
+    "textures": "deepslate_copper_ore"
+  },
+  "nether_gold_ore": {
+    "blockshape": "chorus_flower",
+    "textures": "nether_gold_ore"
+  },
+  "quartz_ore": {
+    "blockshape": "chorus_flower",
+    "textures": "quartz_ore"
+  },
+  "gold_block": {
+    "blockshape": "chorus_flower",
+    "textures": "gold_block"
+  },
+  "ancient_debris": {
+    "blockshape": "chorus_flower",
+    "textures": {
+      "up": "ancient_debris_top",
+      "down": "ancient_debris_top",
+      "north": "ancient_debris_side",
+      "south": "ancient_debris_side",
+      "west": "ancient_debris_side",
+      "east": "ancient_debris_side"
+    }
+  }
+}

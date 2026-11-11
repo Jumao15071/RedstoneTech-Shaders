@@ -1,0 +1,60 @@
+Metadata-Version: 2.4
+Name: lazurite
+Version: 0.12.0
+Summary: Unofficial shader development tool for Minecraft: Bedrock Edition with RenderDragon graphics engine
+Author: veka0
+Project-URL: Documentation, https://veka0.github.io/lazurite
+Project-URL: Repository, https://github.com/veka0/lazurite
+Keywords: shader,minecraft,bedrock,renderdragon
+Classifier: License :: OSI Approved :: GNU Lesser General Public License v3 (LGPLv3)
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Operating System :: Android
+Classifier: Operating System :: MacOS
+Classifier: Operating System :: Microsoft :: Windows
+Classifier: Operating System :: POSIX :: Linux
+Classifier: Topic :: Software Development :: Build Tools
+Classifier: Topic :: Software Development :: Compilers
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: pyjson5
+Requires-Dist: myers
+Requires-Dist: pcpp
+Requires-Dist: pycryptodome
+Requires-Dist: sympy
+Provides-Extra: opengl
+Requires-Dist: moderngl; extra == "opengl"
+Dynamic: license-file
+
+# Lazurite
+
+Unofficial shader development tool for Minecraft: Bedrock Edition with RenderDragon graphics engine.
+
+Documentation: <https://veka0.github.io/lazurite>
+
+PyPi page: <https://pypi.org/project/lazurite>
+
+## Installation
+
+Lazurite requires to have Python 3.10+ installed, but 3.12 is recommended.
+
+Official python installation page: <https://www.python.org/downloads>.
+Windows users are recommended to install Python from Microsoft Store.
+
+After installing python, you can install lazurite package from pypi repository, with a command
+
+```sh
+pip install lazurite
+```
+
+or
+
+```sh
+python -m pip install lazurite
+```
+
+## Next steps
+
+Read the documentation here <https://veka0.github.io/lazurite>

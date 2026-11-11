@@ -1,0 +1,2 @@
+[console_scripts]
+lazurite = lazurite.cli:main
